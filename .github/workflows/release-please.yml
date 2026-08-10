@@ -1,0 +1,91 @@
+name: release-please
+
+on:
+  push:
+    branches:
+      - main
+  # Manual escape hatch: build and publish a tag that was already released
+  # (e.g. when a publish attempt failed and no new release will be cut).
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git tag to build and publish, e.g. v0.2.1"
+        type: string
+        required: true
+
+# Deny by default; each job requests only the scopes it needs.
+permissions: {}
+
+jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: release-please
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
+
+  build:
+    needs: release-please
+    # release-please is skipped on workflow_dispatch, and a skipped dependency
+    # would normally skip this job too, hence `!cancelled()`.
+    if: >-
+      ${{ !cancelled()
+      && needs.release-please.result != 'failure'
+      && (needs.release-please.outputs.release_created == 'true'
+      || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # On push, build the tag release-please just created rather than the
+      # branch head. On workflow_dispatch, build the tag given as an input.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Build package
+        run: uv build
+
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish-to-pypi:
+    name: Publish distribution 📦 to PyPI
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/bindfit
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish distribution 📦 to PyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
