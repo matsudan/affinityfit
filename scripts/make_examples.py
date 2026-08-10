@@ -21,7 +21,7 @@ from bindfit import langmuir
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
-# よく条件づけられた滴定: Kd を挟んで 1/10 から 100 倍まで測る。
+# A well-conditioned titration: measured from a tenth to a hundred times Kd.
 GOOD = {
     "path": EXAMPLES / "titration_good.csv",
     "conc": np.array([0.0, 1.0, 3.0, 10.0, 30.0, 100.0, 300.0, 1000.0]),
@@ -32,8 +32,7 @@ GOOD = {
     "seed": 20260810,
 }
 
-# 飽和に達していない滴定: 最高濃度が Kd の 1/3 しかない。決定係数は高いのに Kd の
-# 信頼区間は広く、片側が決まらないこともある、という例。
+# An undersaturated titration: the highest concentration is only a third of Kd.
 UNSATURATED = {
     "path": EXAMPLES / "titration_unsaturated.csv",
     "conc": np.array([0.0, 1.0, 3.0, 10.0, 30.0, 100.0]),
