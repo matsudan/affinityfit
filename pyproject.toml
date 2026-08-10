@@ -3,6 +3,8 @@ name = "bindfit"
 version = "0.1.0"
 description = "A library for saturation curve fitting and estimation reliability diagnostics"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "matsudan", email = "daaamatsun@gmail.com" }
 ]
@@ -11,7 +13,28 @@ dependencies = [
     "numpy>=2.5.1",
     "scipy>=1.18.0",
 ]
+classifiers = [
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+keywords = [
+    "curve-fitting",
+    "binding-affinity",
+    "dose-response",
+    "dissociation-constant",
+    "langmuir-isotherm",
+    "michaelis-menten",
+    "hill-equation",
+    "confidence-interval",
+    "nonlinear-regression",
+]
 
+[project.urls]
+Homepage = "https://github.com/matsudan/bindfit"
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12.0"]
@@ -33,7 +56,6 @@ python-version = "3.12"
 [tool.ruff]
 line-length = 120
 indent-width = 4
-# The lowest version this package supports. Kept in step with `requires-python`.
 target-version = "py312"
 
 [tool.ruff.lint]
