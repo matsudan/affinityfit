@@ -22,8 +22,8 @@ import sys
 
 import numpy as np
 
-import bindfit
-from bindfit import Dataset, fit, fit_global, hill, langmuir
+import affinityfit
+from affinityfit import Dataset, fit, fit_global, hill, langmuir
 
 
 def require(condition: bool, message: str) -> None:
@@ -60,7 +60,7 @@ def main() -> int:
     cooperative = fit(conc, hill(conc, 10.0, 1.0, 0.0, 2.0), model=hill)
     require(abs(cooperative.params["n"] - 2.0) < 1e-3, f"Hill 係数が合いません: {cooperative.params}")
 
-    marker = pathlib.Path(bindfit.__file__).with_name("py.typed")
+    marker = pathlib.Path(affinityfit.__file__).with_name("py.typed")
     require(marker.is_file(), f"py.typed が配布物にありません: {marker}")
 
     print("ok: fit / fit_global / hill が動作し、py.typed も同梱されています")

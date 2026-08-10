@@ -11,8 +11,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import diagnose, fit, hill, langmuir, michaelis
-from bindfit.core import _residual_structure
+from affinityfit import diagnose, fit, hill, langmuir, michaelis
+from affinityfit.core import _residual_structure
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 15)])
 

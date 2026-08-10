@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, fit_global, langmuir
+from affinityfit import Dataset, fit_global, langmuir
 
 # Measured range for a two-state titration where one form saturates and the other does not.
 L_TWO_STATE = np.array([0.2, 0.32, 0.5, 0.8, 1.1, 1.6])

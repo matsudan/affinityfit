@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, fit, fit_global, langmuir
+from affinityfit import Dataset, fit, fit_global, langmuir
 
 # Measured range that reaches only 1.6 mM, against Kd = 9.0 mM for the reduced state.
 L = np.array([0.2, 0.32, 0.5, 0.8, 1.1, 1.6])

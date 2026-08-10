@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import diagnose, fit, langmuir, load_csv
+from affinityfit import diagnose, fit, langmuir, load_csv
 
 
 def make_data(kd=10.0, bmax=1.0, baseline=0.02, cmax_factor=30.0, n=12, noise=0.0, seed=0):
@@ -135,7 +135,7 @@ def test_no_depletion_warning_when_receptor_is_dilute():
 
 
 def test_diagnose_uses_model_display_names():
-    from bindfit import michaelis
+    from affinityfit import michaelis
 
     conc = np.array([0.5, 1.0, 2.0, 4.0, 8.0])
     msgs = diagnose(conc, np.zeros_like(conc), michaelis, {"km": 1.6, "vmax": 1.0, "baseline": 0.0})
@@ -224,7 +224,7 @@ def test_curve_rejects_nonpositive_and_inverted_range():
         res.curve(10.0, 1.0)
 
 
-def test_matplotlib_is_not_required_to_import_bindfit():
+def test_matplotlib_is_not_required_to_import_affinityfit():
     """The library itself never touches matplotlib.
 
     Plotting is the job of the sample examples/plot_fit.py, which is not part of the distribution.
@@ -235,11 +235,11 @@ def test_matplotlib_is_not_required_to_import_bindfit():
     code = (
         "import sys\n"
         "sys.modules['matplotlib'] = None\n"
-        "import bindfit\n"
+        "import affinityfit\n"
         "import numpy as np\n"
         "c = np.array([0.0, 1, 3, 10, 30, 100, 300])\n"
-        "s = bindfit.langmuir(c, 10.0, 1.0, 0.0)\n"
-        "r = bindfit.fit(c, s)\n"
+        "s = affinityfit.langmuir(c, 10.0, 1.0, 0.0)\n"
+        "r = affinityfit.fit(c, s)\n"
         "x, y = r.curve()\n"
         "assert abs(r.params['kd'] - 10.0) < 1e-6 and len(x) == 300\n"
         "assert 'matplotlib.pyplot' not in sys.modules\n"

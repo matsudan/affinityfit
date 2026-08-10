@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, Statistic, fit, fit_global, hill, langmuir
+from affinityfit import Dataset, Statistic, fit, fit_global, hill, langmuir
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 15)])
 
@@ -91,7 +91,7 @@ def test_all_residuals_one_sign_reports_a_sign_test_instead_of_runs():
     """The runs count is degenerate (always 1) when every residual shares a sign, so a sign test stands in."""
     params = {"kd": 10.0, "bmax": 1.0, "baseline": 0.0}
     signal = langmuir(CONC, *langmuir.ordered(params)) + 0.5
-    from bindfit.core import _residual_structure
+    from affinityfit.core import _residual_structure
 
     collected: list[Statistic] = []
     msgs = _residual_structure(CONC, signal, langmuir, params, collected)

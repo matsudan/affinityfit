@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from bindfit import langmuir
+from affinityfit import langmuir
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 

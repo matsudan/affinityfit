@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, fit, fit_global, hill, langmuir
-from bindfit.fitting import _jacobian_rank
+from affinityfit import Dataset, fit, fit_global, hill, langmuir
+from affinityfit.fitting import _jacobian_rank
 
 METHODS = ("asymptotic", "profile", "bootstrap")
 

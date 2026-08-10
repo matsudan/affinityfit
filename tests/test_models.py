@@ -7,9 +7,9 @@ import warnings
 import numpy as np
 import pytest
 
-from bindfit import MODELS, Dataset, fit, fit_global, hill, langmuir, michaelis
-from bindfit.fitting import _Problem
-from bindfit.models import Model
+from affinityfit import MODELS, Dataset, fit, fit_global, hill, langmuir, michaelis
+from affinityfit.fitting import _Problem
+from affinityfit.models import Model
 
 
 def hill_data(kd=10.0, bmax=1.0, baseline=0.0, n=2.0, points=12, noise=0.0, seed=0):

@@ -11,9 +11,9 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from bindfit import Dataset, fit, fit_global, fitting, hill, langmuir, michaelis
-from bindfit.fitting import _Problem
-from bindfit.models import Model
+from affinityfit import Dataset, fit, fit_global, fitting, hill, langmuir, michaelis
+from affinityfit.fitting import _Problem
+from affinityfit.models import Model
 
 # From fM to 100 M in molar units. Includes the picomolar affinity of SPR (1e-12 M).
 DECADES = [10.0**e for e in range(2, -16, -1)]

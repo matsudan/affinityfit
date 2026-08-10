@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, fit, fit_global, hill, langmuir
+from affinityfit import Dataset, fit, fit_global, hill, langmuir
 
 
 def titration(n_points, kd=10.0):

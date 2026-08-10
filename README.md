@@ -1,4 +1,4 @@
-# bindfit
+# affinityfit
 
 滴定データ（濃度とシグナルの 2 列）から **Kd** などを求め、その推定値を信用してよいかを
 診断する Python ライブラリ。
@@ -19,11 +19,11 @@ signal = baseline + Bmax * [L] / (Kd + [L])
 Python >= 3.12
 
 ```bash
-uv add bindfit
+uv add affinityfit
 ```
 
 ```python
-from bindfit import fit, load_csv
+from affinityfit import fit, load_csv
 
 conc, signal = load_csv("titration.csv")
 res = fit(conc, signal, unit="nM")
@@ -76,7 +76,7 @@ res = fit(conc, signal, receptor_conc=1.0, unit="nM")
 モデルを変えるには `model=` を渡します。
 
 ```python
-from bindfit import hill
+from affinityfit import hill
 
 res = fit(conc, signal, model=hill)  # 協同性を検定する
 print(res.intervals["n"].contains(1.0))
@@ -85,7 +85,7 @@ print(res.intervals["n"].contains(1.0))
 複数データセットを同時にフィッティングし、パラメータを共有・固定する場合:
 
 ```python
-from bindfit import Dataset, fit_global
+from affinityfit import Dataset, fit_global
 
 res = fit_global(
     [Dataset("oxidized", conc, sig_ox), Dataset("reduced", conc, sig_red)],
@@ -297,7 +297,7 @@ q_values = false_discovery_control(p_values, method="bh")
 ## Plotting
 
 図を返す API はありません。論文用の図はフォント・色・パネル構成を自分で制御する必要が
-あるので、`bindfit` は描画に必要な数値だけを返します。
+あるので、`affinityfit` は描画に必要な数値だけを返します。
 
 | メソッド | 返すもの |
 |---|---|

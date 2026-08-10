@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import fit, fitting, langmuir
-from bindfit.uncertainty import MIN_BOOTSTRAP_SAMPLES, profile_bounds
+from affinityfit import fit, fitting, langmuir
+from affinityfit.uncertainty import MIN_BOOTSTRAP_SAMPLES, profile_bounds
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 12)])
 SIGNAL = langmuir(CONC, 10.0, 1.0, 0.02) + np.random.default_rng(0).normal(0, 0.01, CONC.size)
@@ -129,7 +129,7 @@ def test_bootstrap_without_failures_says_nothing_about_convergence():
 
 
 def test_percentile_interval_needs_the_documented_minimum():
-    from bindfit.uncertainty import percentile_interval
+    from affinityfit.uncertainty import percentile_interval
 
     just_under = percentile_interval(np.arange(MIN_BOOTSTRAP_SAMPLES - 1, dtype=float), point=50.0)
     assert not just_under.bounded

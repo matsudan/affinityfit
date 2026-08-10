@@ -13,8 +13,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, fit, fit_global, hill, langmuir, michaelis
-from bindfit.uncertainty import MIN_BOOTSTRAP_SAMPLES
+from affinityfit import Dataset, fit, fit_global, hill, langmuir, michaelis
+from affinityfit.uncertainty import MIN_BOOTSTRAP_SAMPLES
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 12)])
 SIGNAL = langmuir(CONC, 10.0, 1.0, 0.02) + np.random.default_rng(0).normal(0, 0.01, CONC.size)
