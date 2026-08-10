@@ -260,6 +260,40 @@ Kd の 1/3 しかないため上限が決まらず `Kd > 76 nM` としか言え�
 （協同性データを 1:1 でフィッティングする、R² は 0.94〜0.98）の検出率は 100%、
 正しいモデルでの誤検出率は 0.3〜1.7% でした。
 
+### 統計量
+
+警告の判定は固定の有意水準（例: 残差検定は片側 2.5%、不均一分散は片側 1%）で行われて
+います。これは 1 件のフィッティングには適切ですが、複数のデータセットや複数の論文図に
+わたる検定を積み重ねる場合には、その有意水準は検定の数だけ増えた偽陽性率を勝手に
+受け入れていることになります。何本の検定になるか、それをどう補正すべきかはこちら側では
+決められないので、判定の元になった統計量と p 値をそのまま返します。
+
+```python
+res = fit(conc, signal)
+for s in res.statistics:
+    print(s.name, s.statistic, s.p_value)
+```
+
+複数データセットの場合は `GlobalFitResult.statistics_per["データセット名"]` で
+データセットごとに取得できます。集めた p 値に対して、`scipy.stats.false_discovery_control`
+や `statsmodels.stats.multitest.multipletests` で Bonferroni や Benjamini–Hochberg
+補正をかけられます。
+
+```python
+from scipy.stats import false_discovery_control
+
+p_values = [
+    s.p_value
+    for name, stats in res.statistics_per.items()
+    for s in stats
+    if s.name == "heteroscedasticity" and s.p_value is not None
+]
+q_values = false_discovery_control(p_values, method="bh")
+```
+
+`residual_autocorrelation` は固定閾値（0.3）による判定で、p 値を持ちません
+（`p_value` は `None`）。
+
 ## Plotting
 
 図を返す API はありません。論文用の図はフォント・色・パネル構成を自分で制御する必要が

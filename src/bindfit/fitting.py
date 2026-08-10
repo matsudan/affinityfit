@@ -28,7 +28,7 @@ from numpy.typing import NDArray
 from scipy import stats
 from scipy.optimize import least_squares
 
-from bindfit.core import FitResult, _diagnose_coded, _reject_non_finite
+from bindfit.core import FitResult, Statistic, _diagnose_coded, _reject_non_finite
 from bindfit.models import Model, langmuir
 from bindfit.uncertainty import (
     MIN_BOOTSTRAP_SAMPLES,
@@ -539,6 +539,9 @@ class GlobalFitResult:
             dataset, such as having no degrees of freedom.
         warnings_per: Problems detected per dataset, without a name prefix.
         notes_per: Remarks per dataset that are informative rather than problems.
+        statistics_per: Raw statistic and p-value per dataset behind the
+            residual-shape and heteroscedasticity checks, for applying your own
+            multiple-comparison correction across datasets. See `Statistic`.
     """
 
     model: Model
@@ -558,6 +561,7 @@ class GlobalFitResult:
     fit_warnings: tuple[str, ...] = field(default_factory=tuple)
     warnings_per: dict[str, tuple[str, ...]] = field(default_factory=dict)
     notes_per: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    statistics_per: dict[str, tuple[Statistic, ...]] = field(default_factory=dict)
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -611,6 +615,7 @@ class GlobalFitResult:
             unit=self.unit,
             warnings=tuple(self.fit_warnings) + tuple(self.warnings_per.get(name, ())),
             notes=tuple(self.notes_per.get(name, ())),
+            statistics=self.statistics_per.get(name, ()),
         )
 
     def report(self) -> str:
@@ -788,6 +793,7 @@ def fit_global(
     fit_warnings: list[str] = []
     per_warnings: dict[str, list[str]] = {d.name: [] for d in problem.datasets}
     per_notes: dict[str, list[str]] = {d.name: [] for d in problem.datasets}
+    per_statistics: dict[str, list[Statistic]] = {d.name: [] for d in problem.datasets}
 
     # Degree-of-freedom and rank problems do not depend on the interval method, so they belong to the fit as a whole.
     dof = problem.n_points - problem.n_slots
@@ -836,6 +842,7 @@ def fit_global(
     for d in problem.datasets:
         loc = params[d.name][model.location]
         codes: set[str] = set()
+        dataset_stats: list[Statistic] = []
         for code, msg in _diagnose_coded(
             d.conc,
             d.observed,
@@ -846,10 +853,12 @@ def fit_global(
             r2_per[d.name],
             tuple(fixed_d),
             d.sigma is not None,
+            dataset_stats,
         ):
             if code not in suppressed:
                 codes.add(code)
                 per_warnings[d.name].append(msg)
+        per_statistics[d.name] = dataset_stats
 
         unsaturated = float(d.conc.max()) < 3 * loc
         # When the fit itself is broken, sharing cannot be credited with making the estimate possible; pairing that
@@ -886,6 +895,7 @@ def fit_global(
         fit_warnings=tuple(fit_warnings),
         warnings_per={name: tuple(messages) for name, messages in per_warnings.items()},
         notes_per={name: tuple(messages) for name, messages in per_notes.items()},
+        statistics_per={name: tuple(values) for name, values in per_statistics.items()},
     )
 
 

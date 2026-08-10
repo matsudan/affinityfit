@@ -6,7 +6,7 @@ confidence intervals that may be asymmetric or one-sided, and by diagnostics tha
 judge whether the estimate is identifiable from the measured concentration range.
 """
 
-from bindfit.core import FitResult, diagnose, load_csv
+from bindfit.core import FitResult, Statistic, diagnose, load_csv
 from bindfit.fitting import Dataset, GlobalFitResult, fit, fit_global
 from bindfit.models import MODELS, Model, hill, langmuir, michaelis
 from bindfit.uncertainty import Interval, format_with_uncertainty
@@ -18,6 +18,7 @@ __all__ = [
     "GlobalFitResult",
     "Interval",
     "Model",
+    "Statistic",
     "diagnose",
     "fit",
     "fit_global",
