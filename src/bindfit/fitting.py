@@ -821,7 +821,7 @@ def fit_global(
         else:
             fit_warnings.append(
                 f"ブートストラップ {n_boot} 回のうち {bootstrap_failures} 回（{rate:.0%}）が"
-                "収束しませんでした。収束する resample は当てはめやすいものに偏るため、"
+                "収束しませんでした。収束する resample はフィッティングしやすいものに偏るため、"
                 "区間は実際よりも狭い可能性があります。"
             )
 
