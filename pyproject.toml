@@ -1,0 +1,60 @@
+[project]
+name = "bindfit"
+version = "0.1.0"
+description = "A library for saturation curve fitting and estimation reliability diagnostics"
+readme = "README.md"
+authors = [
+    { name = "matsudan", email = "daaamatsun@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.1",
+    "scipy>=1.18.0",
+]
+
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.12.12",
+    # Needed only to run the sample examples/plot_fit.py. The library itself depends
+    # on numpy and scipy alone.
+    "matplotlib>=3.11.1",
+    "ty==0.0.69",
+]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+# The lowest version this package supports. Kept in step with `requires-python`.
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "Q", "UP", "RUF", "S"]
+ignore = [
+    # The diagnostic messages are written in Japanese and use full-width punctuation
+    # deliberately. Only RUF001 (string literals) is needed: comments and docstrings
+    # are English, so RUF002 and RUF003 stay enabled to keep them that way.
+    "RUF001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest rewrites plain asserts, so there is nothing to gain from addressing S101 in
+# the tests. S603/S607 are needed by the check that runs a separate process to confirm
+# the library works without matplotlib.
+"tests/**" = ["S101", "S603", "S607"]
+# The sample exists to be read and copied, so its opening explanation comes first.
+"examples/**" = ["T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
