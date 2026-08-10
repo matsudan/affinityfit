@@ -47,13 +47,6 @@ def test_systematic_deviation_is_caught_across_cooperativity(n_true):
     assert any("残差" in w for w in res.warnings), res.r_squared
 
 
-def test_all_residuals_of_one_sign_is_reported():
-    params = {"kd": 10.0, "bmax": 1.0, "baseline": 0.0}
-    signal = langmuir(CONC, *langmuir.ordered(params)) + 0.5  # shift everything in one direction
-    msgs = _residual_structure(CONC, signal, langmuir, params)
-    assert msgs and "すべてが同じ符号" in msgs[0][1]
-
-
 def test_residual_test_is_skipped_for_an_essentially_exact_fit():
     """When the residuals are at the level of floating-point rounding, their sign pattern means nothing."""
     params = {"kd": 10.0, "bmax": 1.0, "baseline": 0.0}

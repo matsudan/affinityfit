@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, fit, fit_global, hill, langmuir
+from bindfit import Dataset, fit, fit_global, hill, langmuir, michaelis
 from bindfit.uncertainty import MIN_BOOTSTRAP_SAMPLES
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 12)])
@@ -84,20 +84,23 @@ def test_note_remains_when_the_fit_is_sound():
 
 
 def test_note_is_suppressed_when_the_amplitude_collapsed():
-    """A fit whose amplitude collapsed does not claim that the estimate was possible either."""
-    conc = CONC
-    increasing = langmuir(conc, 5.0, 1.0, 0.0)
-    decreasing = langmuir(NARROW, 9.0, -0.8, 1.0)
+    """A fit whose amplitude collapsed does not claim that the estimate was possible either.
+
+    `vmax` is kept non-negative by `michaelis`, so two noiseless decreasing datasets pin the shared
+    amplitude to 0 rather than to a genuine estimate.
+    """
+    down1 = langmuir(CONC, 10.0, -0.8, 1.0)
+    down2 = langmuir(NARROW, 9.0, -0.8, 1.0)
     res = fit_global(
-        [Dataset("up", conc, increasing), Dataset("down", NARROW, decreasing)],
-        model=hill,
-        shared=["bmax"],
-        fixed={"baseline": 0.0},
+        [Dataset("down1", CONC, down1), Dataset("down2", NARROW, down2)],
+        model=michaelis,
+        shared=["vmax"],
+        fixed={"baseline": 1.0},
         ci="asymptotic",
     )
     for name in res.names:
-        if any("潰れています" in w for w in res.warnings_per[name]):
-            assert not any("推定できています" in n for n in res.notes_per[name]), name
+        assert any("潰れています" in w for w in res.warnings_per[name]), name
+        assert not any("推定できています" in n for n in res.notes_per[name]), name
 
 
 def test_suppression_is_per_dataset():
@@ -113,8 +116,9 @@ def test_suppression_is_per_dataset():
         fixed={"baseline": 0.0},
         ci="asymptotic",
     )
-    if any("意味はありません" in w for w in res.warnings_per["bad"]):
-        assert not any("推定できています" in n for n in res.notes_per["bad"])
+    assert any("意味はありません" in w for w in res.warnings_per["bad"])
+    assert not any("推定できています" in n for n in res.notes_per["bad"])
+    assert any("推定できています" in n for n in res.notes_per["good"])
 
 
 # ----------------------------- Explaining a resample count that is too small

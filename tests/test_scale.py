@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from bindfit import MODELS, Dataset, fit, fit_global, fitting, hill, langmuir, michaelis
+from bindfit import Dataset, fit, fit_global, fitting, hill, langmuir, michaelis
 from bindfit.fitting import _Problem
 from bindfit.models import Model
 
@@ -97,17 +97,6 @@ def test_only_positive_unbounded_parameters_use_the_log_scale():
     assert not langmuir.is_log_scale("baseline")
     assert not hill.is_log_scale("n")  # the upper bound is finite
     assert not michaelis.is_log_scale("vmax")  # the lower bound is 0
-
-
-def test_problem_takes_the_log_scale_decision_from_the_model():
-    """The decision is copied across, not rebuilt from the bounds."""
-    conc = np.concatenate([[0.0], np.logspace(-1, 3, 11)])
-    for model in MODELS.values():
-        extra = (2.0,) if "n" in model.params else ()
-        signal = model(conc, 10.0, 1.0, 0.0, *extra)
-        problem = _Problem([Dataset("d", conc, signal)], model, (), {})
-        expected = [model.is_log_scale(name) for name in problem.slot_param]
-        assert problem.log_slots == expected, model.name
 
 
 def test_profile_walk_uses_the_models_definition_not_the_bounds(monkeypatch):

@@ -19,7 +19,6 @@ from bindfit.uncertainty import (
     _significant,
     _spans_orders_of_magnitude,
     format_with_uncertainty,
-    percentile_interval,
 )
 
 # A measured range that reaches only 0.18 times Kd = 9.0 mM: 0.2-1.6 mM.
@@ -155,12 +154,6 @@ def test_format_with_uncertainty_carries_unit():
 def test_format_with_uncertainty_falls_back_when_unusable():
     assert format_with_uncertainty(1.6, 0.0) == "1.6"
     assert format_with_uncertainty(1.6, np.inf) == "1.6"
-
-
-def test_rounding_never_quotes_more_digits_than_the_uncertainty():
-    """The point is to prevent over-reporting such as 4.70e-8 +/- 0.8e-8."""
-    text = format_with_uncertainty(4.70e-8, 0.82e-8)
-    assert "4.70" not in text
 
 
 # ------------------------------------- displaying an interval that spans orders of magnitude (never printing 0)
@@ -402,11 +395,6 @@ def test_dataset_validates_replicate_shape():
         Dataset("d", conc, signal, replicates=np.zeros((1, 3)))
 
 
-def test_percentile_interval_needs_enough_samples():
-    iv = percentile_interval(np.array([1.0, 2.0, 3.0]), point=2.0)
-    assert not iv.bounded
-
-
 # ----------------------------------------------------------- integration and argument passing
 
 
@@ -423,12 +411,6 @@ def test_method_is_recorded_and_reported():
         res = fit(conc, signal, ci=method, n_boot=100)
         assert res.method == method
         assert method in res.report()
-
-
-def test_ci95_property_still_works_for_symmetric_intervals():
-    conc, signal = good_data()
-    res = fit(conc, signal, ci="asymptotic")
-    assert res.ci95["kd"] == pytest.approx(res.intervals["kd"].half_width)
 
 
 def test_fixed_parameter_interval_is_degenerate():

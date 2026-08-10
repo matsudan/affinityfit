@@ -22,6 +22,9 @@ EXACT = langmuir(CONC, 10.0, 1.0, 0.02)
 
 
 def test_diagnose_needs_the_model_and_parameters_positionally():
+    """A type checker catches a missing argument at the call site; Python raises TypeError at runtime too,
+    which removes the need for the doubled arrangement of a `None` default plus an explicit raise.
+    """
     with pytest.raises(TypeError):
         diagnose(CONC, EXACT)  # ty: ignore[missing-argument]
     with pytest.raises(TypeError):

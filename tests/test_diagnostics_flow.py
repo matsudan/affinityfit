@@ -27,13 +27,6 @@ def two_states(noise=0.02, seed=0):
 # ------------------------------------------------- carrying the warnings over
 
 
-def test_result_for_carries_the_warnings_of_that_dataset():
-    res = fit_global(two_states(), fixed=FIXED, ci="asymptotic")
-    sub = res.result_for("reduced")
-    assert sub.warnings
-    assert len(sub.warnings) == len(res.warnings_per["reduced"])
-
-
 def test_result_for_does_not_claim_the_fit_is_clean():
     res = fit_global(two_states(), fixed=FIXED, ci="asymptotic")
     text = res.result_for("reduced").report()
@@ -45,6 +38,7 @@ def test_result_for_does_not_leak_another_datasets_warnings():
     res = fit_global(two_states(), fixed=FIXED, ci="asymptotic")
     oxidized = res.result_for("oxidized").warnings
     reduced = res.result_for("reduced").warnings
+    assert reduced  # the dataset with the narrow range does have something to report
     # no remark that was not raised for the oxidized state may creep in
     assert set(oxidized) == set(res.warnings_per["oxidized"])
     assert set(reduced) == set(res.warnings_per["reduced"])

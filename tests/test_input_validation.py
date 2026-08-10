@@ -106,15 +106,18 @@ def test_csv_rejects_non_finite_concentration_with_a_line_number(tmp_path):
 
 
 def test_csv_reports_a_missing_value_instead_of_dropping_the_row(tmp_path):
-    """Silently discarding a blank cell changes the number of points, the degrees of freedom and the diagnostics."""
+    """Silently discarding a blank cell changes the number of points, the degrees of freedom and the diagnostics.
+
+    A blank concentration and a blank signal collapse to the same one-cell row once empty cells are
+    filtered, so both are reported through the same message rather than being told apart.
+    """
     path = write(tmp_path, "gap.csv", "conc,signal\n0,0.02\n1,0.11\n3,\n10,0.51\n30,0.77\n100,0.93\n")
-    with pytest.raises(ValueError, match=r"gap\.csv:4: one of the two values is missing"):
+    with pytest.raises(ValueError, match=r"gap\.csv:4: one of the two values is missing") as info:
         load_csv(path)
+    assert "number of points" in str(info.value)
 
-
-def test_csv_missing_concentration_is_also_reported(tmp_path):
-    path = write(tmp_path, "gap.csv", "conc,signal\n0,0.02\n1,0.11\n,0.25\n10,0.51\n30,0.77\n")
-    with pytest.raises(ValueError, match=r"gap\.csv:4: one of the two values is missing"):
+    path = write(tmp_path, "gap2.csv", "conc,signal\n0,0.02\n1,0.11\n,0.25\n10,0.51\n30,0.77\n")
+    with pytest.raises(ValueError, match=r"gap2\.csv:4: one of the two values is missing"):
         load_csv(path)
 
 
@@ -127,10 +130,3 @@ def test_csv_still_skips_blank_lines_headers_and_comments(tmp_path):
     conc, signal = load_csv(path)
     assert len(conc) == 6
     assert conc[0] == 0.0 and signal[-1] == pytest.approx(0.93)
-
-
-def test_csv_error_message_explains_why_dropping_is_not_an_option(tmp_path):
-    path = write(tmp_path, "gap.csv", "conc,signal\n0,0.02\n1,0.11\n3,\n10,0.51\n30,0.77\n")
-    with pytest.raises(ValueError) as info:
-        load_csv(path)
-    assert "number of points" in str(info.value)

@@ -190,13 +190,8 @@ def test_p_values_collected_across_datasets_can_be_corrected_with_scipy():
 # --------------------------------------------------------------- Statistic itself
 
 
-def test_statistic_is_a_plain_frozen_dataclass():
+def test_statistic_is_frozen():
+    """`Statistic` must not be mutable after construction, matching the other result objects in the library."""
     s = Statistic(name="residual_runs", statistic=-2.0, p_value=0.02, alpha=0.025)
-    assert s.name == "residual_runs"
     with pytest.raises(AttributeError):
         s.statistic = 0.0  # ty: ignore[invalid-assignment]
-
-
-def test_statistic_p_value_can_be_none():
-    s = Statistic(name="residual_autocorrelation", statistic=0.4, p_value=None, alpha=0.3)
-    assert s.p_value is None

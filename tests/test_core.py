@@ -143,19 +143,6 @@ def test_diagnose_uses_model_display_names():
     assert not any("Kd=" in m for m in msgs)
 
 
-def test_diagnose_requires_the_model_and_the_parameters():
-    """They are positional arguments that cannot be omitted, so a type checker catches this at the call site.
-
-    Python raises TypeError at runtime as well, which removes the need for the doubled arrangement of a `None`
-    default plus an explicit raise.
-    """
-    conc = np.array([1.0, 2.0, 3.0])
-    with pytest.raises(TypeError):
-        diagnose(conc, conc, langmuir)  # ty: ignore[missing-argument]
-    with pytest.raises(TypeError):
-        diagnose(conc, conc)  # ty: ignore[missing-argument]
-
-
 # ------------------------------------------------------------------- CSV loading
 
 
