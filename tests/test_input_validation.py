@@ -12,7 +12,7 @@ import warnings
 import numpy as np
 import pytest
 
-from bindfit import Dataset, fit, fit_global, langmuir, load_csv
+from affinityfit import Dataset, fit, fit_global, langmuir, load_csv
 
 CONC = np.array([0.0, 1.0, 3.0, 10.0, 30.0, 100.0])
 SIGNAL = langmuir(CONC, 10.0, 1.0, 0.0)

@@ -11,8 +11,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, diagnose, fit, fit_global, hill, langmuir
-from bindfit.uncertainty import Interval, profile_bounds
+from affinityfit import Dataset, diagnose, fit, fit_global, hill, langmuir
+from affinityfit.uncertainty import Interval, profile_bounds
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 12)])
 EXACT = langmuir(CONC, 10.0, 1.0, 0.02)

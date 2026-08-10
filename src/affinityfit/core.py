@@ -18,8 +18,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import stats
 
-from bindfit.models import Model
-from bindfit.uncertainty import Interval
+from affinityfit.models import Model
+from affinityfit.uncertainty import Interval
 
 
 @dataclass(frozen=True)

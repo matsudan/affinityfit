@@ -1,6 +1,6 @@
 """Sample: read a titration from CSV, fit it, and draw the figure yourself.
 
-This is a sample, not part of the package. bindfit deliberately returns numbers
+This is a sample, not part of the package. affinityfit deliberately returns numbers
 rather than figures, because a publication figure always needs its own fonts,
 colours and panel layout. What is worth copying from here is the plotting geometry:
 
@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
-from bindfit import MODELS, FitResult, fit, load_csv
+from affinityfit import MODELS, FitResult, fit, load_csv
 
 
 def plot_fit(

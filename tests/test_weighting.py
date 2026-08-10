@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bindfit import Dataset, fit, fit_global, langmuir
+from affinityfit import Dataset, fit, fit_global, langmuir
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 13)])
 TRUTH = langmuir(CONC, 10.0, 1.0, 0.0)

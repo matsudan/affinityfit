@@ -28,9 +28,9 @@ from numpy.typing import NDArray
 from scipy import stats
 from scipy.optimize import least_squares
 
-from bindfit.core import FitResult, Statistic, _diagnose_coded, _reject_non_finite
-from bindfit.models import Model, langmuir
-from bindfit.uncertainty import (
+from affinityfit.core import FitResult, Statistic, _diagnose_coded, _reject_non_finite
+from affinityfit.models import Model, langmuir
+from affinityfit.uncertainty import (
     MIN_BOOTSTRAP_SAMPLES,
     SEARCH_SPAN,
     Interval,

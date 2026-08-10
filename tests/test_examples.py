@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from bindfit import fit, hill, langmuir
+from affinityfit import fit, hill, langmuir
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
@@ -82,7 +82,7 @@ def test_sample_main_runs_end_to_end(sample, tmp_path, capsys):
 
 
 def test_sample_main_accepts_every_model(sample, tmp_path):
-    from bindfit import MODELS
+    from affinityfit import MODELS
 
     for name in MODELS:
         out = tmp_path / f"{name}.png"
@@ -104,7 +104,7 @@ def test_example_files_declare_that_they_are_synthetic():
 
 def test_good_example_is_consistent_with_the_model_it_illustrates():
     """「良いデータ」が協同性ありと判定されるようでは例にならない。"""
-    from bindfit import fit, hill, load_csv
+    from affinityfit import fit, hill, load_csv
 
     conc, signal = load_csv(EXAMPLES / "titration_good.csv")
     res = fit(conc, signal, ci="profile")
@@ -117,7 +117,7 @@ def test_good_example_is_consistent_with_the_model_it_illustrates():
 
 
 def test_unsaturated_example_still_shows_an_undetermined_limit():
-    from bindfit import fit, load_csv
+    from affinityfit import fit, load_csv
 
     conc, signal = load_csv(EXAMPLES / "titration_unsaturated.csv")
     res = fit(conc, signal, ci="profile")

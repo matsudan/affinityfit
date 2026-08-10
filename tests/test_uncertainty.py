@@ -13,8 +13,8 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from bindfit import Dataset, fit, fit_global, hill, langmuir
-from bindfit.uncertainty import (
+from affinityfit import Dataset, fit, fit_global, hill, langmuir
+from affinityfit.uncertainty import (
     Interval,
     _significant,
     _spans_orders_of_magnitude,
