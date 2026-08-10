@@ -1,9 +1,11 @@
+# Synthetic data, not from any publication. Regenerate with scripts/make_examples.py
+# langmuir: Kd=10 nM, Bmax=1, baseline=0.02, gaussian noise sd=0.01, seed=20260810
 concentration_nM,signal
-0,0.021
-1,0.095
-3,0.223
-10,0.502
-30,0.760
-100,0.918
-300,0.972
-1000,0.989
+0,0.0249
+1,0.0963
+3,0.2493
+10,0.5090
+30,0.7657
+100,0.9249
+300,0.9758
+1000,1.0035

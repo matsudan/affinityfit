@@ -88,3 +88,57 @@ def test_sample_main_accepts_every_model(sample, tmp_path):
         out = tmp_path / f"{name}.png"
         assert sample.main([str(EXAMPLES / "titration_good.csv"), "--model", name, "--out", str(out)]) == 0
         assert out.exists()
+
+
+# ------------------------------- 例データが例として妥当であること
+
+
+def test_example_files_declare_that_they_are_synthetic():
+    """論文由来と誤解されないよう、由来をファイル内に書いておく。"""
+    for name in ("titration_good.csv", "titration_unsaturated.csv"):
+        text = (EXAMPLES / name).read_text(encoding="utf-8")
+        assert "not from any publication" in text, name
+        assert "make_examples.py" in text, name
+        assert "seed=" in text, name
+
+
+def test_good_example_is_consistent_with_the_model_it_illustrates():
+    """「良いデータ」が協同性ありと判定されるようでは例にならない。"""
+    from bindfit import fit, hill, load_csv
+
+    conc, signal = load_csv(EXAMPLES / "titration_good.csv")
+    res = fit(conc, signal, ci="profile")
+    assert res.warnings == (), res.warnings
+    assert res.r_squared > 0.999
+
+    cooperative = fit(conc, signal, model=hill, ci="profile")
+    assert cooperative.intervals["n"].contains(1.0)
+    assert res.aicc < cooperative.aicc  # 余分なパラメータは支持されない
+
+
+def test_unsaturated_example_still_shows_an_undetermined_limit():
+    from bindfit import fit, load_csv
+
+    conc, signal = load_csv(EXAMPLES / "titration_unsaturated.csv")
+    res = fit(conc, signal, ci="profile")
+    assert res.r_squared > 0.99  # 当てはまりは良く見える
+    assert res.intervals["kd"].upper is None  # それでも上限は決まらない
+    assert any("飽和に達しておらず" in w for w in res.warnings)
+
+
+def test_examples_can_be_regenerated_reproducibly(tmp_path, monkeypatch):
+    """スクリプトを 2 回走らせても同じ内容になること。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "sample_make_examples", EXAMPLES.parent / "scripts" / "make_examples.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    original = (EXAMPLES / "titration_good.csv").read_text(encoding="utf-8")
+    monkeypatch.setitem(module.GOOD, "path", tmp_path / "again.csv")
+    module.write(module.GOOD)
+    assert (tmp_path / "again.csv").read_text(encoding="utf-8") == original
