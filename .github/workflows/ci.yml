@@ -1,0 +1,113 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  # Deliberately kept out of the `test` matrix. The interpreter ty checks against is
+  # decided by `[tool.ty.environment]` rather than by the one it runs on, so a matrix
+  # would only repeat the same check. This package ships `py.typed`, which makes the
+  # annotations part of the public API and therefore something CI has to protect.
+  types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Type check
+        run: uv run ty check
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      # matplotlib is needed because some tests run the sample for real. It is in the
+      # dev group, so an ordinary sync brings it in.
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run tests
+        run: uv run pytest
+
+  # Confirms in an environment where matplotlib is genuinely absent that the library
+  # works on numpy and scipy alone. The unit test
+  # `test_matplotlib_is_not_required_to_import_bindfit` stubs `sys.modules`, which only
+  # imitates that situation, so an environment where the package was never installed
+  # can be checked nowhere but here.
+  runtime-deps-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      # Sync the runtime dependencies alone, without the dev ones (matplotlib included).
+      - name: Install runtime dependencies only
+        run: uv sync --locked --no-default-groups
+
+      # `uv run` re-syncs the dev groups by default, so it has to be countered on the
+      # run side as well. Forgetting it brings matplotlib back and silently voids what
+      # this job checks.
+      #
+      # The script lives in its own file so that ruff and ty check it. A script embedded
+      # in YAML rots silently when the API changes.
+      - name: Assert the library works without matplotlib and ships py.typed
+        run: uv run --no-default-groups python scripts/smoke_no_extras.py
