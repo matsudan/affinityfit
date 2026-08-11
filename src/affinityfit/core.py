@@ -60,18 +60,6 @@ class Statistic:
             whenever it occurs regardless of `p_value`. A stricter level, or a
             family-wise correction across several fits, can be applied instead by
             comparing `p_value` directly.
-
-    Examples:
-        Collecting a Bonferroni-corrected verdict across several fits:
-
-        >>> from statsmodels.stats.multitest import multipletests  # doctest: +SKIP
-        >>> p_values = [
-        ...     s.p_value
-        ...     for res in results
-        ...     for s in res.statistics
-        ...     if s.name == "heteroscedasticity" and s.p_value is not None
-        ... ]  # doctest: +SKIP
-        >>> rejected, _, _, _ = multipletests(p_values, method="bonferroni")  # doctest: +SKIP
     """
 
     name: str
@@ -170,9 +158,6 @@ class FitResult:
 
         Raises:
             ValueError: If `conc_min` is not positive, or `conc_max` <= `conc_min`.
-
-        Examples:
-            >>> ax.plot(*result.curve())   # doctest: +SKIP
         """
         centre = self.location
         lo = conc_min if conc_min is not None else centre / 100.0

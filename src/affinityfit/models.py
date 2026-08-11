@@ -17,8 +17,8 @@ which is what lets one set of checks serve every model.
 Models are callable, so the same object works as a plain function and as the
 `model=` argument of a fit:
 
-    >>> langmuir(conc, 10.0, 1.0, 0.0)          # doctest: +SKIP
-    >>> fit(conc, signal, model=langmuir)        # doctest: +SKIP
+    langmuir(conc, 10.0, 1.0, 0.0)
+    fit(conc, signal, model=langmuir)
 """
 
 from __future__ import annotations
