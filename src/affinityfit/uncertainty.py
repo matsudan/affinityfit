@@ -354,7 +354,11 @@ def profile_bounds(
                         outside_v = mid
                     else:
                         inside_v = mid
-                    if abs(outside_v - inside_v) <= 1e-10 * max(abs(inside_v), 1.0):
+                    if log_scale and inside_v > 0 and outside_v > 0:
+                        converged = abs(math.log(outside_v) - math.log(inside_v)) <= 1e-10
+                    else:
+                        converged = abs(outside_v - inside_v) <= 1e-10 * max(abs(inside_v), 1.0)
+                    if converged:
                         break
                 return inside_v
 
