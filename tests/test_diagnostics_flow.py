@@ -7,7 +7,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from affinityfit import Dataset, Diagnostic, fit, fit_global, langmuir
+from affinityfit import Dataset, Diagnostic, DiagnosticCode, fit, fit_global, langmuir
 
 L = np.array([0.2, 0.32, 0.5, 0.8, 1.1, 1.6])
 FIXED = {"baseline": 0.0}
@@ -48,11 +48,11 @@ def test_result_for_carries_notes_as_structured_diagnostics():
 
 def test_global_notes_include_fit_wide_diagnostics():
     res = fit_global(two_states(), fixed=FIXED, ci="asymptotic")
-    fit_note = Diagnostic("fit_context", "note", "Fit-wide context.")
+    fit_note = Diagnostic(DiagnosticCode.SHARED_AMPLITUDE_IDENTIFIES_LOCATION, "note", "Fit-wide context.")
     res = replace(res, fit_diagnostics=(fit_note,))
     assert res.notes == (fit_note,)
     assert res.result_for("oxidized").notes == (fit_note,)
-    assert "NOTE [fit_context]: Fit-wide context." in res.report()
+    assert "NOTE [shared_amplitude_identifies_location]: Fit-wide context." in res.report()
 
 
 def test_fit_result_without_diagnostics_is_empty():

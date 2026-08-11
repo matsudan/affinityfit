@@ -18,3 +18,7 @@ coverage.xml
 .ruff_cache/
 
 .env
+
+# IDE
+.kiro
+.vscode
