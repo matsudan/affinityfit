@@ -394,13 +394,20 @@ def _residual_structure(
     if z >= -1.96 and autocorr <= 0.3:
         return []
 
+    # Pointing at `hill` is only useful to someone not already fitting an exponent. Suggesting it to a
+    # model that has one sends them back to what they are doing, and under ligand depletion, which is
+    # one cause of this pattern, it points away from the actual explanation.
+    suggestion = (
+        "別の機構（リガンド枯渇なら tight_binding）を検討してください。"
+        if model.exponent is not None
+        else "協同性（hill）や別の機構を検討してください。"
+    )
     return [
         (
             "residual_structure",
             f"残差が系統的に偏っています（符号の連 {runs} / 期待 {mean_runs:.1f}, z = {z:.2f}、"
             f"隣接残差の自己相関 = {autocorr:.2f}）。符号の並び: {pattern}。"
-            "決定係数が高くてもモデルの形が機構に合っていません。"
-            "協同性（hill）や別の機構を検討してください。",
+            "決定係数が高くてもモデルの形が機構に合っていません。" + suggestion,
         )
     ]
 
@@ -487,7 +494,9 @@ def _diagnose_coded(
         params: Fitted parameters.
         intervals: Confidence intervals, used for the Hill coefficient check
             and to flag parameters whose limits are undetermined.
-        receptor_conc: Concentration of the fixed partner.
+        receptor_conc: Concentration of the fixed partner. Ignored when the model
+            declares a `receptor` role, since such a model already solves the
+            depletion this would warn about.
         r_squared: Coefficient of determination, used to detect a model that does
             not describe the data at all.
         fixed_names: Parameters that were held constant, exempt from the
@@ -643,25 +652,44 @@ def _diagnose_coded(
             )
         )
 
-    if receptor_conc is not None and receptor_conc > loc / 10:
+    # A model that declares a receptor role already solves the depletion, so recommending one would be
+    # pointing at the model in use.
+    if model.receptor is None and receptor_conc is not None and receptor_conc > loc / 10:
+        # Depletion steepens the curve as well as shifting it, so a model that reads an exponent off
+        # that steepness reports cooperativity that is not there. No model solves depletion and
+        # cooperativity together, so the honest advice is to remove the depletion from the experiment
+        # rather than to switch model, and saying "use tight_binding" alone would leave a dead end.
+        if model.exponent is None:
+            also_exponent = ""
+        elif model.cooperative:
+            also_exponent = (
+                f"{model.label(model.exponent)} も 1 を上回る側に偏るため、この条件では協同性を"
+                "判定できません（枯渇と協同性を同時に解くモデルはありません）。協同性を見るには"
+                f"受容体濃度を {loc_name} の 1/10 以下にした測定が必要です。"
+            )
+        else:
+            also_exponent = f"{model.label(model.exponent)} も 1 を上回る側に偏るため、そのまま解釈できません。"
         msgs.append(
             (
                 "ligand_depletion",
                 f"受容体（固定側）濃度 {receptor_conc:.3g} が {loc_name} の 1/10 を超えています。"
                 f"結合によって遊離リガンドが減るため、このモデルは {loc_name} を過大評価します。"
-                "tight-binding（二次式）モデルが必要です。",
+                "tight_binding モデル（二次式）を使ってください。" + also_exponent,
             )
         )
 
-    # Whether the Hill coefficient differs significantly from 1 is decided by whether its interval contains 1.
-    if "n" in model.params and intervals is not None and "n" in intervals:
-        n_interval = intervals["n"]
-        n_hill = float(params["n"])
+    # Whether the exponent differs significantly from 1 is decided by whether its interval contains 1.
+    # Only an exponent the model calls cooperative is interpreted this way; a dose-response slope is a
+    # description of the curve, and a slope near 1 there is the ordinary case rather than a finding.
+    coop = model.exponent if model.cooperative else None
+    if coop is not None and intervals is not None and coop in intervals:
+        n_interval = intervals[coop]
+        coop_name = model.label(coop)
         if not n_interval.bounded:
             msgs.append(
                 (
                     "hill_n_undetermined",
-                    f"Hill 係数 n = {n_hill:.3g} の信頼区間の片側が決定できません。"
+                    f"{coop_name} = {float(params[coop]):.3g} の信頼区間の片側が決定できません。"
                     "協同性の有無を判定できるデータになっていません。",
                 )
             )
@@ -669,7 +697,7 @@ def _diagnose_coded(
             msgs.append(
                 (
                     "hill_n_includes_one",
-                    f"Hill 係数 n = {n_interval.format()} の信頼区間が 1 を含みます。"
+                    f"{coop_name} = {n_interval.format()} の信頼区間が 1 を含みます。"
                     "協同性があるとは主張できません。langmuir モデルで十分か AICc で比較してください。",
                 )
             )
@@ -677,8 +705,28 @@ def _diagnose_coded(
             msgs.append(
                 (
                     "hill_n_below_one",
-                    f"Hill 係数 n = {n_interval.format()} が有意に 1 を下回っています。負の協同性、"
+                    f"{coop_name} = {n_interval.format()} が有意に 1 を下回っています。負の協同性、"
                     "結合サイトの不均一性、または試料の不均一性を示唆します。",
+                )
+            )
+        else:
+            # The direction people set out to claim, and the one an artefact reproduces most easily. It
+            # is caveated rather than contradicted: a steep curve does have a cooperative reading, but
+            # the same shape arrives without any cooperativity at all, so the alternatives are named.
+            # Depletion comes first because it is the one this library can rule out from an input.
+            detail = (
+                "受容体（固定側）濃度が未指定のため、枯渇によるものかを判定できていません。"
+                "receptor_conc= を渡すと枯渇の有無を検査できます。"
+                if receptor_conc is None
+                else ""
+            )
+            msgs.append(
+                (
+                    "hill_n_above_one",
+                    f"{coop_name} = {n_interval.format()} が有意に 1 を上回っています。正の協同性と"
+                    "解釈できますが、協同性がなくても同じ形は生じます。リガンド枯渇（受容体濃度が "
+                    f"{loc_name} に対して希薄でない）、会合・自己集合、平衡に達していない読み出しは"
+                    "いずれも 1 を上回る側に偏らせます。これらを除外できるか確認してください。" + detail,
                 )
             )
 
@@ -732,7 +780,8 @@ def diagnose(
         intervals: Confidence intervals, used for the Hill coefficient check
             and to flag parameters whose limits are undetermined.
         receptor_conc: Concentration of the immobilised or fixed partner. Enables
-            the ligand-depletion check when given.
+            the ligand-depletion check when given, unless the model already solves
+            the depletion itself.
         r_squared: Coefficient of determination, used to detect a model that does
             not describe the data at all.
         fixed_names: Parameters that were held constant, exempt from the

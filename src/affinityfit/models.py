@@ -7,9 +7,16 @@ Adding a model does not require touching the fitting or diagnostic code.
 Every model here is a saturation curve, so each declares three roles:
 
 - `location`: the concentration at half saturation. Kd for `langmuir`, Km for
-  `michaelis`.
+  `michaelis`, IC50 for `ic50`.
 - `amplitude`: the span of the observable between baseline and saturation.
 - `baseline`: the signal at zero concentration, or None if the model has no offset.
+
+Further roles are optional. `receptor` is declared by a model that solves ligand
+depletion itself, and names the parameter holding the total concentration of the fixed
+partner. `exponent` names the parameter that sets how steep the curve is, and
+`cooperative` says whether that exponent is a claim about a mechanism or merely the
+shape of the curve; the two are separate because a steepness worth reporting is not
+always a cooperativity worth arguing over.
 
 The diagnostics are written against these roles rather than literal parameter names,
 which is what lets one set of checks serve every model.
@@ -47,6 +54,20 @@ class Model:
         amplitude: Name of the parameter that is the signal span.
         baseline: Name of the offset parameter, or None if the model has none.
         description: One-line summary shown by the CLI.
+        receptor: Name of the parameter holding the total concentration of the fixed
+            partner, or None when the model assumes it is dilute enough that binding
+            does not measurably deplete the free ligand. Only a model that solves the
+            depletion explicitly sets this; the diagnostics read it to decide whether
+            recommending such a model still makes sense.
+        exponent: Name of the parameter that decides how steep the curve is, or None
+            when the model has none. Anything that reads the steepness looks here,
+            whether to interpret it or to check that a formula relying on it being 1
+            is allowed to be applied.
+        cooperative: Whether `exponent` is a claim about binding mechanism rather than
+            a description of the curve. True subscribes the model to the checks on
+            whether cooperativity can be claimed; the slope of a dose-response curve
+            is a shape parameter, so that model declares the exponent and leaves this
+            False.
     """
 
     name: str
@@ -59,6 +80,9 @@ class Model:
     amplitude: str
     baseline: str | None
     description: str
+    receptor: str | None = None
+    exponent: str | None = None
+    cooperative: bool = False
 
     def __call__(self, conc: NDArray[np.float64] | float, *params: float) -> NDArray[np.float64]:
         """Evaluate the model, so it can be used as a plain function."""
@@ -116,6 +140,42 @@ def _hill(conc: NDArray[np.float64], kd: float, bmax: float, baseline: float, n:
     return baseline + bmax / (1.0 + powered)
 
 
+def _tight_binding(
+    conc: NDArray[np.float64], kd: float, bmax: float, baseline: float, rt: float
+) -> NDArray[np.float64]:
+    """Binding with ligand depletion solved exactly, written so that it keeps its precision.
+
+    A hyperbola assumes the free ligand concentration equals the total one. That stops
+    holding once the receptor is not much more dilute than Kd, because every molecule
+    bound is one fewer left in solution. Solving the equilibrium without the assumption
+    gives a quadratic in the complex concentration,
+
+        [RL]^2 - (Rt + Lt + Kd) [RL] + Rt Lt = 0,
+
+    whose physical root is the smaller one. Evaluated directly as
+    `(b - sqrt(b^2 - 4 Rt Lt)) / 2` it subtracts two nearly equal numbers at low
+    concentration and throws away most of the significant digits exactly where the
+    curve is most informative. Multiplying by the conjugate turns that subtraction into
+    an addition, and dividing through by `b` keeps `b^2` from overflowing:
+
+        [RL] / Rt = 2 v / (1 + sqrt(1 - 4 u v)),   u = Rt / b,   v = Lt / b.
+
+    Cancelling Rt is also what makes rt = 0 evaluable, where the expression collapses
+    to the hyperbola `Lt / (Lt + Kd)` that `langmuir` describes.
+    """
+    total = rt + conc + kd
+    # Every term is non-negative and Kd is bounded away from zero, so `total` is positive in any fit.
+    # Substituting 1 covers a direct call with kd = 0 at zero concentration, where both numerators
+    # are 0 as well and the fraction is 0 either way.
+    scale = np.where(total > 0, total, 1.0)
+    u = rt / scale
+    v = conc / scale
+    # 4 Rt Lt <= (Rt + Lt + Kd)^2 holds for any non-negative Kd, so the discriminant cannot be
+    # negative; the clamp only absorbs rounding at the boundary, reached when Rt = Lt and Kd = 0.
+    disc = np.maximum(1.0 - 4.0 * u * v, 0.0)
+    return baseline + bmax * (2.0 * v / (1.0 + np.sqrt(disc)))
+
+
 # ---------------------------------------------------------------- initial guesses
 
 
@@ -149,6 +209,22 @@ def _guess_hill(conc: NDArray[np.float64], signal: NDArray[np.float64]) -> dict[
 def _guess_michaelis(conc: NDArray[np.float64], signal: NDArray[np.float64]) -> dict[str, float]:
     g = _guess_saturation(conc, signal)
     return {"km": g["kd"], "vmax": g["bmax"], "baseline": g["baseline"]}
+
+
+def _guess_ic50(conc: NDArray[np.float64], signal: NDArray[np.float64]) -> dict[str, float]:
+    g = _guess_saturation(conc, signal)
+    # A slope of 1 is the plain saturation curve, which is what a steeper or shallower one is judged
+    # against, so it is where the search starts.
+    return {"ic50": g["kd"], "bmax": g["bmax"], "baseline": g["baseline"], "hillslope": 1.0}
+
+
+def _guess_tight_binding(conc: NDArray[np.float64], signal: NDArray[np.float64]) -> dict[str, float]:
+    g = _guess_saturation(conc, signal)
+    # Under depletion the observed midpoint sits near Kd + Rt/2, so it cannot be divided between the
+    # two without knowing one of them. The receptor starts at a tenth of it, the point at which
+    # depletion stops being negligible, which leaves the data free to pull it upwards. When rt is
+    # supplied through `fixed=`, which is the usual case, this guess is never used.
+    return {"kd": g["kd"], "bmax": g["bmax"], "baseline": g["baseline"], "rt": g["kd"] / 10.0}
 
 
 # ----------------------------------------------------------------------- models
@@ -186,6 +262,8 @@ hill = Model(
     location="kd",
     amplitude="bmax",
     baseline="baseline",
+    exponent="n",
+    cooperative=True,
     description="Cooperative binding: signal = baseline + Bmax * L^n / (Kd^n + L^n)",
 )
 
@@ -206,4 +284,44 @@ michaelis = Model(
     description="Michaelis-Menten: v = baseline + Vmax * S / (Km + S)",
 )
 
-MODELS: dict[str, Model] = {m.name: m for m in (langmuir, hill, michaelis)}
+ic50 = Model(
+    name="ic50",
+    params=("ic50", "bmax", "baseline", "hillslope"),
+    # The same algebra as `hill`. What differs is the vocabulary and, with it, the diagnostics: the
+    # slope is declared as an exponent but not as a cooperative one, so the checks that ask whether
+    # cooperativity can be claimed stay out of a dose-response report, where a slope near 1 is the
+    # ordinary case rather than a finding. Declaring it at all is what lets a correction that assumes
+    # a slope of 1, such as Cheng-Prusoff, find the slope and refuse to be applied blindly.
+    func=_hill,
+    bounds={"ic50": _POSITIVE, "bmax": _FREE, "baseline": _FREE, "hillslope": (0.05, 20.0)},
+    initial=_guess_ic50,
+    display={"ic50": "IC50", "bmax": "Bmax", "baseline": "baseline", "hillslope": "Hill slope"},
+    location="ic50",
+    amplitude="bmax",
+    baseline="baseline",
+    exponent="hillslope",
+    # A positive Bmax turns the same curve into an activation (EC50) measurement; the half-maximal
+    # concentration is still read from the `ic50` parameter.
+    description="Dose-response (4PL): response = baseline + Bmax * L^h / (IC50^h + L^h); Bmax < 0 inhibits",
+)
+
+# The placement diagnostics compare the measured range against `kd`. Depletion makes the curve reach
+# its plateau at a lower multiple of Kd than a hyperbola does, so those thresholds are conservative
+# here rather than retuned: they can still ask for concentrations higher than this model needs.
+tight_binding = Model(
+    name="tight_binding",
+    params=("kd", "bmax", "baseline", "rt"),
+    func=_tight_binding,
+    # Rt is left able to reach 0, which is the no-depletion limit. A fit that lands there is reported
+    # by the stuck-at-a-bound check, and says that `langmuir` describes the data just as well.
+    bounds={"kd": _POSITIVE, "bmax": _FREE, "baseline": _FREE, "rt": _NON_NEGATIVE},
+    initial=_guess_tight_binding,
+    display={"kd": "Kd", "bmax": "Bmax", "baseline": "baseline", "rt": "Rt"},
+    location="kd",
+    amplitude="bmax",
+    baseline="baseline",
+    receptor="rt",
+    description="Tight binding: 1:1 binding solved for ligand depletion, Rt = total receptor",
+)
+
+MODELS: dict[str, Model] = {m.name: m for m in (langmuir, hill, michaelis, ic50, tight_binding)}

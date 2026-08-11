@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
 import warnings
+from decimal import Decimal, localcontext
 
 import numpy as np
 import pytest
 
-from affinityfit import MODELS, Dataset, fit, fit_global, hill, langmuir, michaelis
+from affinityfit import MODELS, Dataset, fit, fit_global, hill, ic50, langmuir, michaelis, tight_binding
 from affinityfit.fitting import _Problem
 from affinityfit.models import Model
 
@@ -24,7 +26,7 @@ def hill_data(kd=10.0, bmax=1.0, baseline=0.0, n=2.0, points=12, noise=0.0, seed
 
 
 def test_registry_lists_every_model():
-    assert set(MODELS) == {"langmuir", "hill", "michaelis"}
+    assert set(MODELS) == {"langmuir", "hill", "michaelis", "ic50", "tight_binding"}
     for name, model in MODELS.items():
         assert isinstance(model, Model)
         assert model.name == name
@@ -36,6 +38,10 @@ def test_models_declare_consistent_roles():
         assert model.location in model.params
         assert model.amplitude in model.params
         assert model.baseline is None or model.baseline in model.params
+        assert model.receptor is None or model.receptor in model.params
+        assert model.exponent is None or model.exponent in model.params
+        # Calling an exponent cooperative without having one would leave the claim attached to nothing.
+        assert not model.cooperative or model.exponent is not None
         assert set(model.bounds) == set(model.params)
         assert set(model.display) == set(model.params)
 
@@ -190,6 +196,34 @@ def test_no_hill_warning_for_langmuir_model():
     assert not any("Hill" in w for w in res.warnings)
 
 
+def test_hill_caveats_a_coefficient_significantly_above_one():
+    """The direction people set out to claim does not pass without the alternatives being named.
+
+    A steep curve reads as positive cooperativity, but ligand depletion, self-association
+    and a reading taken before equilibrium all produce the same shape. The claim is
+    caveated rather than contradicted, so a genuine result still comes through.
+    """
+    conc, signal = hill_data(kd=10.0, n=2.5, points=20)
+    res = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
+    assert not res.intervals["n"].contains(1.0)
+    above = [w for w in res.warnings if "1 を上回っています" in w]
+    assert len(above) == 1, res.warnings
+    assert "リガンド枯渇" in above[0]
+    assert "会合" in above[0]
+
+
+def test_the_coefficient_checks_are_symmetric_about_one():
+    """Both directions carry an interpretation. Only one of them used to."""
+    conc = np.concatenate([[0.0], np.logspace(-1, 2, 20)])
+    verdicts = {}
+    for n_true in (0.4, 2.5):
+        signal = hill(conc, 10.0, 1.0, 0.0, n_true)
+        res = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
+        verdicts[n_true] = res.warnings
+    assert any("1 を下回っています" in w for w in verdicts[0.4])
+    assert any("1 を上回っています" in w for w in verdicts[2.5])
+
+
 def test_aicc_prefers_hill_on_cooperative_data():
     """Checked over several seeds. A claim about model selection cannot rest on a single noise realisation."""
     hits = 0
@@ -279,6 +313,296 @@ def test_michaelis_diagnostics_speak_of_km_not_kd():
     assert res.warnings
     assert all("Kd" not in w for w in res.warnings)
     assert any("Km" in w for w in res.warnings)
+
+
+# ------------------------------------------------ IC50 (dose-response) model
+
+
+def ic50_data(half=50.0, span=-100.0, top=100.0, hillslope=1.4, points=16):
+    conc = np.logspace(np.log10(half / 50), np.log10(half * 50), points)
+    return conc, ic50(conc, half, span, top, hillslope)
+
+
+def test_ic50_shares_the_algebra_of_hill():
+    conc = np.logspace(0, 4, 12)
+    np.testing.assert_allclose(
+        ic50(conc, 50.0, -100.0, 100.0, 1.4),
+        hill(conc, 50.0, -100.0, 100.0, 1.4),
+    )
+
+
+def test_ic50_recovers_known_values_from_an_inhibition_curve():
+    conc, response = ic50_data(half=50.0, hillslope=1.4)
+    # The response runs from the top plateau down towards zero, which is how inhibition is reported.
+    assert response[0] > 99.0
+    assert response[-1] < 1.0
+    res = fit(conc, response, model=ic50, unit="nM")
+    assert res.params["ic50"] == pytest.approx(50.0, rel=1e-6)
+    assert res.params["hillslope"] == pytest.approx(1.4, rel=1e-6)
+
+
+def test_ic50_report_uses_the_pharmacology_labels():
+    conc, response = ic50_data()
+    text = fit(conc, response, model=ic50, unit="nM").report()
+    assert "IC50" in text
+    assert "Hill slope" in text
+    assert "Kd" not in text
+
+
+def test_ic50_keeps_cooperativity_advice_out_of_the_report():
+    """Declaring the slope without calling it cooperative is what keeps those checks with `hill`.
+
+    A dose-response slope near 1 is the ordinary case rather than a finding, and the
+    advice to compare against `langmuir` is about a model nobody reaches for here. The
+    exclusion is declared rather than a side effect of what the parameter is called, and
+    the slope is still declared so that a correction assuming a slope of 1 can find it.
+    """
+    assert ic50.exponent == "hillslope"
+    assert ic50.cooperative is False
+    assert hill.exponent == "n"
+    assert hill.cooperative is True
+    conc, response = ic50_data(hillslope=1.0)
+    noisy = response + np.random.default_rng(5).normal(0.0, 1.0, conc.size)
+    res = fit(conc, noisy, model=ic50)
+    assert all("協同性" not in w for w in res.warnings)
+    assert all("langmuir" not in w for w in res.warnings)
+
+
+def test_ic50_also_describes_an_activation_curve():
+    """A positive amplitude turns the same model into an EC50 measurement."""
+    conc = np.logspace(0, 4, 16)
+    response = ic50(conc, 50.0, 100.0, 0.0, 1.0)
+    # Rising from the bottom plateau towards the top, the mirror image of the inhibition curve.
+    assert response[0] < 5.0
+    assert response[-1] > 95.0
+    assert np.all(np.diff(response) > 0)
+    res = fit(conc, response, model=ic50)
+    assert res.params["ic50"] == pytest.approx(50.0, rel=1e-6)
+    assert res.params["bmax"] > 0
+
+
+# ------------------------------------------------------- Tight binding model
+
+
+def _exact_bound_fraction(conc: float, kd: float, rt: float) -> float:
+    """Fraction of receptor bound, evaluated at 60 digits to serve as a reference."""
+    with localcontext() as ctx:
+        ctx.prec = 60
+        b = Decimal(rt) + Decimal(conc) + Decimal(kd)
+        disc = b * b - 4 * Decimal(rt) * Decimal(conc)
+        return float((b - disc.sqrt()) / (2 * Decimal(rt)))
+
+
+def _naive_bound_fraction(conc: float, kd: float, rt: float) -> float:
+    """The textbook root, kept here only so the test can show that it fails."""
+    b = rt + conc + kd
+    return (b - math.sqrt(b * b - 4.0 * rt * conc)) / (2.0 * rt)
+
+
+def test_tight_binding_reduces_to_langmuir_without_receptor():
+    """With no receptor there is nothing to deplete, and the quadratic collapses to the hyperbola."""
+    conc = np.array([0.0, 0.1, 1.0, 10.0, 100.0, 1e6])
+    np.testing.assert_allclose(
+        tight_binding(conc, 10.0, 1.0, 0.02, 0.0),
+        langmuir(conc, 10.0, 1.0, 0.02),
+        rtol=1e-12,
+    )
+
+
+def test_tight_binding_limits_are_exact():
+    assert tight_binding(np.array([0.0]), 1.0, 1.0, 0.25, 5.0)[0] == pytest.approx(0.25)
+    assert tight_binding(np.array([1e12]), 1.0, 1.0, 0.0, 5.0)[0] == pytest.approx(1.0)
+
+
+def test_tight_binding_keeps_precision_where_the_naive_root_collapses():
+    """The conjugate form stays exact where `b - sqrt(b^2 - 4 Rt Lt)` loses its digits.
+
+    At low concentration those two terms agree to nearly every digit they carry, so the
+    direct difference returns mostly rounding noise. The test pins the improvement
+    rather than only the result: it also checks that the textbook expression really does
+    fail here, which is what makes a regression back to it visible.
+    """
+    kd = rt = 1.0
+    for conc in (1e-8, 1e-12, 1e-16):
+        exact = _exact_bound_fraction(conc, kd, rt)
+        stable = float(tight_binding(np.array([conc]), kd, 1.0, 0.0, rt)[0])
+        naive = _naive_bound_fraction(conc, kd, rt)
+        assert abs(stable - exact) / exact <= 1e-14, (conc, stable, exact)
+        assert abs(naive - exact) / exact > 1e-9, (conc, naive, exact)
+
+
+def test_tight_binding_is_finite_across_the_parameter_domain():
+    conc = np.array([0.0, 1e-18, 1e-12, 1e-6, 1.0, 1e6, 1e12])
+    for exponent in range(-30, 7):
+        for rt in (0.0, 1e-12, 1.0, 1e6, 1e12):
+            for baseline in (0.0, -1.0, 2.5):
+                out = tight_binding(conc, 10.0**exponent, 1.0, baseline, rt)
+                assert np.all(np.isfinite(out)), (exponent, rt, baseline)
+
+
+def test_tight_binding_fraction_stays_within_zero_and_one():
+    """A fraction of the receptor cannot be negative or exceed all of it, at any parameters.
+
+    The upper end is allowed a few epsilons of slack. The bound holds exactly in
+    arithmetic, so an overshoot is rounding in the last place, and it is left there
+    rather than clamped: a clamp would flatten the derivative at saturation, which
+    costs the optimiser more than the last bit is worth.
+    """
+    conc = np.array([0.0, 1e-18, 1e-12, 1e-6, 1.0, 1e6, 1e12])
+    slack = 4 * np.finfo(float).eps
+    for exponent in range(-30, 7):
+        for rt in (0.0, 1e-12, 1.0, 1e6, 1e12):
+            # With bmax = 1 and baseline = 0 the model returns the bound fraction itself.
+            fraction = tight_binding(conc, 10.0**exponent, 1.0, 0.0, rt)
+            assert np.all(fraction >= 0.0), (exponent, rt, fraction)
+            assert np.all(fraction <= 1.0 + slack), (exponent, rt, fraction)
+
+
+def test_tight_binding_emits_no_runtime_warning_at_the_extremes():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        tight_binding(np.array([0.0, 1e-20, 1.0, 1e20]), 1e-30, 1.0, 0.0, 0.0)
+        tight_binding(np.array([0.0, 1e-20, 1.0, 1e20]), 1e30, 1.0, 0.0, 1e20)
+
+
+def test_tight_binding_recovers_a_kd_that_langmuir_overestimates():
+    """With the receptor at five times Kd, the hyperbola reports the wrong constant.
+
+    Depletion moves the apparent midpoint to roughly Kd + Rt/2, so `langmuir` reads
+    around 3.5 where the truth is 1.0. Solving the quadratic recovers it.
+    """
+    kd, rt = 1.0, 5.0
+    conc = np.concatenate([[0.0], np.logspace(-2, 2, 14)])
+    signal = tight_binding(conc, kd, 1.0, 0.0, rt)
+
+    quadratic = fit(conc, signal, model=tight_binding, fixed={"rt": rt, "baseline": 0.0})
+    hyperbola = fit(conc, signal, model=langmuir, fixed={"baseline": 0.0})
+
+    assert quadratic.params["kd"] == pytest.approx(kd, rel=1e-6)
+    assert hyperbola.params["kd"] > 3 * kd
+
+
+def test_tight_binding_estimates_the_active_receptor_concentration():
+    """Leaving rt free measures how much of the receptor is actually binding.
+
+    Depletion changes the shape of the curve and not only its midpoint, which is what
+    keeps rt and Kd from simply trading off against each other.
+    """
+    kd, rt = 1.0, 5.0
+    conc = np.concatenate([[0.0], np.logspace(-2, 2, 14)])
+    signal = tight_binding(conc, kd, 1.0, 0.0, rt)
+    res = fit(conc, signal, model=tight_binding, fixed={"baseline": 0.0})
+    assert res.params["rt"] == pytest.approx(rt, rel=1e-4)
+    assert res.params["kd"] == pytest.approx(kd, rel=1e-4)
+
+
+def test_tight_binding_still_separates_rt_from_kd_under_noise():
+    """The separation is not an artefact of noiseless data: the intervals still cover the truth."""
+    kd, rt = 1.0, 5.0
+    conc = np.concatenate([[0.0], np.logspace(-2, 2, 20)])
+    clean = tight_binding(conc, kd, 1.0, 0.0, rt)
+    signal = clean + np.random.default_rng(11).normal(0.0, 0.01, conc.size)
+    res = fit(conc, signal, model=tight_binding, fixed={"baseline": 0.0})
+    assert res.intervals["kd"].contains(kd)
+    assert res.intervals["rt"].contains(rt)
+
+
+def test_depletion_does_not_pass_as_positive_cooperativity():
+    """Pure 1:1 data under depletion fits `hill` with a significant n > 1, and must not pass quietly.
+
+    This is the failure the diagnostics exist for. The system has no cooperativity
+    whatsoever, the fit looks excellent, and the documented test for cooperativity
+    (`intervals["n"].contains(1.0)`) comes back False. Following that without a warning
+    puts a claim about mechanism into a paper that the data never supported.
+    """
+    kd, rt = 1.0, 5.0
+    conc = np.logspace(-1, 2, 10)
+    signal = tight_binding(conc, kd, 1.0, 0.0, rt)
+
+    res = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
+    # The trap: a significant exponent above 1 out of a system that has none.
+    assert res.r_squared > 0.99
+    assert not res.intervals["n"].contains(1.0)
+    assert res.params["n"] > 1.3
+    # What has to be said about it.
+    assert any("1 を上回っています" in w for w in res.warnings)
+    assert any("リガンド枯渇" in w for w in res.warnings)
+
+
+def test_depletion_with_a_cooperativity_model_reports_the_exponent_as_unusable():
+    """Given the receptor concentration, the verdict covers the exponent as well as Kd.
+
+    Reporting only the inflated Kd would leave the cooperativity reading standing, and
+    naming `tight_binding` alone is a dead end because it has no exponent, so the advice
+    has to send the measurement back to a dilute receptor.
+    """
+    kd, rt = 1.0, 5.0
+    conc = np.logspace(-1, 2, 10)
+    signal = tight_binding(conc, kd, 1.0, 0.0, rt)
+    res = fit(conc, signal, model=hill, receptor_conc=rt, fixed={"baseline": 0.0})
+
+    depletion = [w for w in res.warnings if "1/10 を超えています" in w]
+    assert len(depletion) == 1, res.warnings
+    assert "n (Hill)" in depletion[0]
+    assert "協同性を判定できません" in depletion[0]
+
+
+def test_an_unchecked_receptor_concentration_is_stated_where_it_bites():
+    """Without `receptor_conc` the depletion check cannot run, and a significant n > 1 is where it counts.
+
+    The remark rides on that verdict rather than being raised on every fit. Flagging
+    every fit that leaves an optional argument out would teach the reader to skim past
+    the warnings that carry something.
+    """
+    kd, rt = 1.0, 5.0
+    conc = np.logspace(-1, 2, 10)
+    signal = tight_binding(conc, kd, 1.0, 0.0, rt)
+
+    unchecked = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
+    assert any("受容体（固定側）濃度が未指定" in w for w in unchecked.warnings)
+
+    # Told that the receptor is dilute, the fit keeps the caveat but drops the unchecked remark.
+    dilute = fit(conc, signal, model=hill, receptor_conc=0.01, fixed={"baseline": 0.0})
+    assert any("1 を上回っています" in w for w in dilute.warnings)
+    assert not any("未指定" in w for w in dilute.warnings)
+
+    # A fit with nothing to explain stays quiet either way.
+    clean_conc, clean_signal = hill_data(n=1.0, points=16)
+    clean = fit(clean_conc, clean_signal, model=hill, fixed={"baseline": 0.0})
+    assert not any("未指定" in w for w in clean.warnings)
+
+
+def test_the_shape_warning_does_not_send_hill_back_to_hill():
+    """The advice on a mismatched shape must not name the model already running.
+
+    Suggesting cooperativity to `langmuir` is useful. Repeating it to `hill` points at
+    what is already in use, and on depletion data it points away from the real cause.
+    """
+    kd, rt = 1.0, 5.0
+    conc = np.concatenate([[0.0], np.logspace(-2, 2, 14)])
+    signal = tight_binding(conc, kd, 1.0, 0.0, rt)
+
+    def shape_warnings(model):
+        return [w for w in fit(conc, signal, model=model, fixed={"baseline": 0.0}).warnings if "残差が系統的" in w]
+
+    on_hill = shape_warnings(hill)
+    on_langmuir = shape_warnings(langmuir)
+    assert len(on_hill) == 1
+    assert len(on_langmuir) == 1
+    assert "協同性（hill）" not in on_hill[0]
+    assert "tight_binding" in on_hill[0]
+    assert "協同性（hill）" in on_langmuir[0]
+
+
+def test_tight_binding_suppresses_the_advice_to_use_itself():
+    """The depletion warning names `tight_binding`, so it must not fire on `tight_binding`."""
+    kd, rt = 1.0, 5.0
+    conc = np.concatenate([[0.0], np.logspace(-2, 2, 14)])
+    signal = tight_binding(conc, kd, 1.0, 0.0, rt)
+    quadratic = fit(conc, signal, model=tight_binding, receptor_conc=rt, fixed={"rt": rt, "baseline": 0.0})
+    hyperbola = fit(conc, signal, model=langmuir, receptor_conc=rt, fixed={"baseline": 0.0})
+    assert not any("tight_binding" in w for w in quadratic.warnings)
+    assert any("tight_binding" in w for w in hyperbola.warnings)
 
 
 # ------------------------------------------------- Combined with a global fit
