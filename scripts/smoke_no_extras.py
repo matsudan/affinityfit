@@ -23,7 +23,7 @@ import sys
 import numpy as np
 
 import affinityfit
-from affinityfit import Dataset, fit, fit_global, hill, langmuir
+from affinityfit import Dataset, fit, fit_global, hill, ic50, ki_from_ic50, langmuir, tight_binding
 
 
 def require(condition: bool, message: str) -> None:
@@ -60,10 +60,19 @@ def main() -> int:
     cooperative = fit(conc, hill(conc, 10.0, 1.0, 0.0, 2.0), model=hill)
     require(abs(cooperative.params["n"] - 2.0) < 1e-3, f"Hill 係数が合いません: {cooperative.params}")
 
+    dose = fit(conc[1:], ic50(conc[1:], 10.0, -100.0, 100.0, 1.0), model=ic50)
+    require(abs(dose.params["ic50"] - 10.0) < 1e-3, f"IC50 が合いません: {dose.params}")
+
+    # The quadratic form leans on numpy alone, and `conversions` is imported for the first time here,
+    # so both are exercised in an environment where nothing beyond numpy and scipy is installed.
+    depleted = fit(conc, tight_binding(conc, 10.0, 1.0, 0.0, 50.0), model=tight_binding, fixed={"rt": 50.0})
+    require(abs(depleted.params["kd"] - 10.0) < 1e-3, f"tight_binding の Kd が合いません: {depleted.params}")
+    require(abs(ki_from_ic50(10.0, tracer_conc=2.0, tracer_kd=2.0) - 5.0) < 1e-12, "Cheng-Prusoff 補正が合いません")
+
     marker = pathlib.Path(affinityfit.__file__).with_name("py.typed")
     require(marker.is_file(), f"py.typed が配布物にありません: {marker}")
 
-    print("ok: fit / fit_global / hill が動作し、py.typed も同梱されています")
+    print("ok: fit / fit_global / hill / ic50 / tight_binding が動作し、py.typed も同梱されています")
     return 0
 
 

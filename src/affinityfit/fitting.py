@@ -730,9 +730,6 @@ def fit_global(
         Residuals from the datasets are concatenated, so a dataset whose signal is
         larger dominates unless `Dataset.sigma` says otherwise. Give sigma, or
         normalise the signals onto a common scale, when they differ in magnitude.
-        Sigma has to be given for every dataset or for none: with only some of them
-        weighted, the balance between datasets would be set by the unit sigma happens
-        to be written in.
     """
     shared_t, fixed_d = _validate(datasets, model, shared, fixed or {})
     if ci == "bootstrap" and n_boot < MIN_BOOTSTRAP_SAMPLES:

@@ -6,9 +6,10 @@ confidence intervals that may be asymmetric or one-sided, and by diagnostics tha
 judge whether the estimate is identifiable from the measured concentration range.
 """
 
+from affinityfit.conversions import ki_from_ic50
 from affinityfit.core import FitResult, Statistic, diagnose, load_csv
 from affinityfit.fitting import Dataset, GlobalFitResult, fit, fit_global
-from affinityfit.models import MODELS, Model, hill, langmuir, michaelis
+from affinityfit.models import MODELS, Model, hill, ic50, langmuir, michaelis, tight_binding
 from affinityfit.uncertainty import Interval, format_with_uncertainty
 
 __all__ = [
@@ -24,7 +25,10 @@ __all__ = [
     "fit_global",
     "format_with_uncertainty",
     "hill",
+    "ic50",
+    "ki_from_ic50",
     "langmuir",
     "load_csv",
     "michaelis",
+    "tight_binding",
 ]

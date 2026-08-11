@@ -122,16 +122,16 @@ def test_no_extrapolation_warning_when_low_points_exist():
 
 
 def test_warns_on_ligand_depletion():
-    """Receptor concentration above one tenth of Kd -> warning that a tight-binding treatment is needed."""
+    """Receptor concentration above one tenth of Kd -> warning that names the model to switch to."""
     conc, signal = make_data(kd=10.0)
     res = fit(conc, signal, receptor_conc=5.0)
-    assert any("tight-binding" in w for w in res.warnings)
+    assert any("tight_binding" in w for w in res.warnings)
 
 
 def test_no_depletion_warning_when_receptor_is_dilute():
     conc, signal = make_data(kd=10.0)
     res = fit(conc, signal, receptor_conc=0.1)
-    assert not any("tight-binding" in w for w in res.warnings)
+    assert not any("tight_binding" in w for w in res.warnings)
 
 
 def test_diagnose_uses_model_display_names():
