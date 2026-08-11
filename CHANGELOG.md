@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/matsudan/affinityfit/compare/v0.1.0...v0.2.0) (2026-08-11)
+
+
+### Features
+
+* add DiagnosticCode enum for discoverable diagnostic codes ([#12](https://github.com/matsudan/affinityfit/issues/12)) ([b63caa0](https://github.com/matsudan/affinityfit/commit/b63caa091f5b792aa45cf5179c869ce9a789853e))
+* add ic50 and tight_binding models with depletion-aware diagnostics ([#9](https://github.com/matsudan/affinityfit/issues/9)) ([88a88ec](https://github.com/matsudan/affinityfit/commit/88a88ecda00215e247e6f873a72980551721e66b))
+* add structured diagnostics API ([#11](https://github.com/matsudan/affinityfit/issues/11)) ([135e288](https://github.com/matsudan/affinityfit/commit/135e288f16eccb04a71bdfca92bd67c74d425022))
+
+
+### Bug Fixes
+
+* make profile confidence intervals scale-invariant ([#10](https://github.com/matsudan/affinityfit/issues/10)) ([f8ac624](https://github.com/matsudan/affinityfit/commit/f8ac6247df1c02982e3bbcc344053d8cd2ee2a71))
+
+
+### Documentation
+
+* translate README ([#7](https://github.com/matsudan/affinityfit/issues/7)) ([f15ac15](https://github.com/matsudan/affinityfit/commit/f15ac15c6c23ef502970e9f437f5246f9f0223df))
+
 ## 0.1.0 (2026-08-10)
 
 
