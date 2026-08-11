@@ -185,8 +185,11 @@ def test_hill_on_noncooperative_data_warns_that_n_includes_one():
 
 
 def test_hill_warns_when_n_is_significantly_below_one():
-    conc, signal = hill_data(kd=10.0, n=0.4, points=20)
+    conc, clean = hill_data(kd=10.0, n=0.4, points=20)
+    # Real scatter, because a verdict of "significant" needs a spread to be significant against.
+    signal = clean + np.random.default_rng(2).normal(0.0, 0.01, conc.size)
     res = fit(conc, signal, model=hill)
+    assert not res.intervals["n"].zero_width
     assert any("有意に 1 を下回っています" in w for w in res.warnings)
 
 
@@ -203,8 +206,11 @@ def test_hill_caveats_a_coefficient_significantly_above_one():
     and a reading taken before equilibrium all produce the same shape. The claim is
     caveated rather than contradicted, so a genuine result still comes through.
     """
-    conc, signal = hill_data(kd=10.0, n=2.5, points=20)
+    conc, clean = hill_data(kd=10.0, n=2.5, points=20)
+    # Real scatter, because a verdict of "significant" needs a spread to be significant against.
+    signal = clean + np.random.default_rng(3).normal(0.0, 0.01, conc.size)
     res = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
+    assert not res.intervals["n"].zero_width
     assert not res.intervals["n"].contains(1.0)
     above = [w for w in res.warnings if "1 を上回っています" in w]
     assert len(above) == 1, res.warnings
@@ -212,13 +218,33 @@ def test_hill_caveats_a_coefficient_significantly_above_one():
     assert "会合" in above[0]
 
 
+def test_an_exponent_with_no_scatter_behind_it_is_not_given_a_direction():
+    """Data the model fits exactly leaves no spread, and no direction can be read off that.
+
+    The interval collapses onto the estimate, so whether it brackets 1 is decided by the
+    last bit of rounding: the same noiseless curve came out just under 1 on one machine
+    and just over it on another, which would have it suggest negative cooperativity in
+    one place and positive in the other. Absence of scatter is absence of information,
+    not certainty, so the verdict has to be that it cannot be judged.
+    """
+    conc, signal = hill_data(n=1.0, points=16)
+    res = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
+    interval = res.intervals["n"]
+    assert interval.zero_width
+
+    assert any("判定できるデータになっていません" in w for w in res.warnings)
+    assert not any("1 を下回っています" in w for w in res.warnings)
+    assert not any("1 を上回っています" in w for w in res.warnings)
+
+
 def test_the_coefficient_checks_are_symmetric_about_one():
     """Both directions carry an interpretation. Only one of them used to."""
     conc = np.concatenate([[0.0], np.logspace(-1, 2, 20)])
     verdicts = {}
     for n_true in (0.4, 2.5):
-        signal = hill(conc, 10.0, 1.0, 0.0, n_true)
+        signal = hill(conc, 10.0, 1.0, 0.0, n_true) + np.random.default_rng(4).normal(0.0, 0.01, conc.size)
         res = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
+        assert not res.intervals["n"].contains(1.0), n_true
         verdicts[n_true] = res.warnings
     assert any("1 を下回っています" in w for w in verdicts[0.4])
     assert any("1 を上回っています" in w for w in verdicts[2.5])
@@ -568,7 +594,10 @@ def test_an_unchecked_receptor_concentration_is_stated_where_it_bites():
 
     # A fit with nothing to explain stays quiet either way.
     clean_conc, clean_signal = hill_data(n=1.0, points=16)
-    clean = fit(clean_conc, clean_signal, model=hill, fixed={"baseline": 0.0})
+    scattered = clean_signal + np.random.default_rng(7).normal(0.0, 0.01, clean_conc.size)
+    clean = fit(clean_conc, scattered, model=hill, fixed={"baseline": 0.0})
+    # Stated rather than assumed: the remark rides on a verdict of "above 1", which this is not.
+    assert clean.intervals["n"].contains(1.0)
     assert not any("未指定" in w for w in clean.warnings)
 
 

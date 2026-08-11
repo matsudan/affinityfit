@@ -685,11 +685,20 @@ def _diagnose_coded(
     if coop is not None and intervals is not None and coop in intervals:
         n_interval = intervals[coop]
         coop_name = model.label(coop)
-        if not n_interval.bounded:
+        # A zero-width interval means the residuals left nothing to estimate a spread from, which is an
+        # absence of information rather than perfect knowledge. Reading a direction off one would turn
+        # the last bit of floating-point rounding into a claim about a mechanism, so it is refused for
+        # the same reason an unbounded interval is.
+        if not n_interval.bounded or n_interval.zero_width:
+            reason = (
+                "残差にばらつきがないため信頼区間が幅を持ちません"
+                if n_interval.zero_width
+                else "の信頼区間の片側が決定できません"
+            )
             msgs.append(
                 (
                     "hill_n_undetermined",
-                    f"{coop_name} = {float(params[coop]):.3g} の信頼区間の片側が決定できません。"
+                    f"{coop_name} = {float(params[coop]):.3g} {reason}。"
                     "協同性の有無を判定できるデータになっていません。",
                 )
             )

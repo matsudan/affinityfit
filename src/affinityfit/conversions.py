@@ -196,7 +196,9 @@ def _check_slope(result: FitResult) -> None:
     if exponent is None or exponent not in result.intervals:
         return
     slope = result.intervals[exponent]
-    if not slope.bounded or slope.contains(1.0):
+    # A zero-width interval carries no spread to test against, so whether it happens to bracket 1 comes
+    # down to rounding in the last place. Warning off that would fire on data the model fits exactly.
+    if not slope.bounded or slope.zero_width or slope.contains(1.0):
         return
     warnings.warn(
         f"{result.model.label(exponent)} = {slope.format()} の信頼区間が 1 を含みません。"

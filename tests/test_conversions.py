@@ -118,6 +118,19 @@ def test_the_slope_cannot_be_checked_from_an_interval_alone():
     assert user_warnings(lambda: ki_from_ic50(res.intervals["ic50"], tracer_conc=5.0, tracer_kd=2.0)) == []
 
 
+def test_a_slope_with_no_scatter_behind_it_raises_nothing():
+    """Data the model fits exactly leaves no spread, so there is no slope test to fail.
+
+    The interval collapses onto the estimate and whether it brackets 1 is then decided by
+    rounding in the last place, which would have the warning fire on a perfect fit at a
+    slope of exactly 1.
+    """
+    conc = np.logspace(0, 4, 16)
+    res = fit(conc, ic50(conc, 50.0, -100.0, 100.0, 1.0), model=ic50, unit="nM")
+    assert res.intervals["hillslope"].zero_width
+    assert user_warnings(lambda: ki_from_ic50(res, tracer_conc=5.0, tracer_kd=2.0)) == []
+
+
 def test_a_fit_result_is_read_through_the_location_role():
     """The half-maximal concentration is found by role, so the overload is not tied to one model."""
     res = fitted(1.0, seed=1)
