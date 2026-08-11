@@ -75,9 +75,9 @@ def test_recovers_decreasing_parameters_with_noise():
 
 def test_decreasing_data_produces_no_spurious_model_warnings():
     conc, signal = quench(noise=0.02, seed=1)
-    res = fit(conc, signal)
-    assert not any("潰れています" in w for w in res.warnings)
-    assert not any("決定係数" in w for w in res.warnings)
+    codes = {diagnostic.code for diagnostic in fit(conc, signal).warnings}
+    assert "amplitude_collapsed" not in codes
+    assert "no_fit" not in codes and "poor_fit" not in codes
 
 
 def test_profile_interval_handles_a_negative_amplitude():
@@ -107,14 +107,11 @@ def test_global_fit_shares_a_negative_amplitude():
 
 
 def test_michaelis_on_decreasing_data_says_so_and_points_at_the_fix():
-    """Vmax is a rate, so it is kept non-negative; in exchange, the mismatch is stated explicitly."""
+    """The structured diagnostic names the collapsed-amplitude condition without string matching."""
     conc, signal = quench()
-    res = fit(conc, signal, model=michaelis)
-    collapsed = [w for w in res.warnings if "潰れています" in w]
-    assert collapsed, res.warnings
-    assert "非負に制限されています" in collapsed[0]
-    assert "langmuir または hill" in collapsed[0]
-    assert any("決定係数" in w for w in res.warnings)
+    codes = {diagnostic.code for diagnostic in fit(conc, signal, model=michaelis).warnings}
+    assert "amplitude_collapsed" in codes
+    assert "no_fit" in codes
 
 
 def test_poor_fit_is_reported_for_data_the_model_cannot_describe():
@@ -122,25 +119,25 @@ def test_poor_fit_is_reported_for_data_the_model_cannot_describe():
     signal = np.array([0.5, 2.0, 0.1, 1.8, 0.3, 2.2, 0.4, 1.9, 0.2, 2.1, 0.6, 1.7])
     res = fit(conc, signal)
     assert res.r_squared < 0.5
-    assert any("モデルがデータの傾向を捉えていません" in w for w in res.warnings)
+    assert "no_fit" in {diagnostic.code for diagnostic in res.warnings}
 
 
-def test_amplitude_collapse_warning_names_the_model_parameter():
+def test_amplitude_collapse_is_machine_readable():
     conc, signal = quench()
     res = fit(conc, signal, model=michaelis)
-    assert any(w.startswith("Vmax = ") for w in res.warnings)
+    assert "amplitude_collapsed" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_no_poor_fit_warning_when_r_squared_is_unknown():
     from affinityfit import diagnose
 
     conc, signal = quench()
-    msgs = diagnose(conc, signal, langmuir, {"kd": KD, "bmax": BMAX, "baseline": BASELINE})
-    assert not any("決定係数" in m for m in msgs)
+    diagnostics = diagnose(conc, signal, langmuir, {"kd": KD, "bmax": BMAX, "baseline": BASELINE})
+    assert not {"no_fit", "poor_fit"} & {diagnostic.code for diagnostic in diagnostics}
 
 
 def test_good_fit_does_not_trigger_the_poor_fit_warning():
     conc, signal = quench(noise=0.05, seed=7)
     res = fit(conc, signal)
     assert res.r_squared > 0.9
-    assert not any("決定係数" in w for w in res.warnings)
+    assert not {"no_fit", "poor_fit"} & {diagnostic.code for diagnostic in res.warnings}

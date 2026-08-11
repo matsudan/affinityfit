@@ -8,10 +8,12 @@
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 import numpy as np
 import pytest
 
-from affinityfit import Dataset, diagnose, fit, fit_global, hill, langmuir
+from affinityfit import Dataset, Diagnostic, diagnose, fit, fit_global, hill, langmuir
 from affinityfit.uncertainty import Interval, profile_bounds
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 12)])
@@ -32,8 +34,16 @@ def test_diagnose_needs_the_model_and_parameters_positionally():
 
 
 def test_diagnose_works_when_both_are_given():
-    messages = diagnose(CONC, EXACT, langmuir, {"kd": 10.0, "bmax": 1.0, "baseline": 0.02})
-    assert isinstance(messages, tuple)
+    diagnostics = diagnose(CONC, EXACT, langmuir, {"kd": 10.0, "bmax": 1.0, "baseline": 0.02})
+    assert isinstance(diagnostics, tuple)
+    assert all(isinstance(diagnostic, Diagnostic) for diagnostic in diagnostics)
+    assert all(diagnostic.message.isascii() for diagnostic in diagnostics)
+
+
+def test_diagnostic_rejects_an_unsupported_severity():
+    severity = cast(Literal["warning", "note"], "error")
+    with pytest.raises(ValueError, match="Unsupported diagnostic severity"):
+        Diagnostic("invalid_severity", severity, "Invalid severity.")
 
 
 def test_diagnose_has_no_none_default_for_params():

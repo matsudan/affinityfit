@@ -35,11 +35,25 @@ from affinityfit import fit, load_csv
 conc, signal = load_csv("titration.csv")
 res = fit(conc, signal, unit="nM")
 
-print(res.report())
 print(res.params["kd"], res.intervals["kd"].format("nM"))
-for warning in res.warnings:
-    print(warning)
+
+# `code` is the stable programmatic contract. `severity` classifies the finding.
+for diagnostic in res.diagnostics:
+    print(diagnostic.code, diagnostic.severity, diagnostic.message)
+
+if any(diagnostic.code == "not_saturated" for diagnostic in res.diagnostics):
+    # Extend the concentration range before interpreting Kd or Bmax.
+    pass
+
+# Optional, caller-controlled text rendering for a terminal or notebook.
+print(res.report())
 ```
+
+`res.diagnostics` is the canonical diagnostics API. Each immutable `Diagnostic`
+has a stable `code` for program logic, a `severity` of `"warning"` or `"note"`,
+and a concise English `message` for display. Do not branch on `message`: its prose
+may be refined without changing the code. `res.warnings` and `res.notes` are
+severity-filtered views containing the same `Diagnostic` objects.
 
 The input CSV has concentration in the first column and signal in the second.
 Header rows, comment rows, and blank rows are skipped. Repeated rows at the same
@@ -61,7 +75,7 @@ concentration_nM,signal
 1000,1.0035
 ```
 
-Output of `report()`:
+Output of the optional `report()` renderer:
 
 ```
 model    : langmuir  (1:1 binding: signal = baseline + Bmax * L / (Kd + L))
@@ -72,7 +86,7 @@ baseline = 0.018 +/- 0.014
 R^2      = 0.9998   (n = 8)
 AICc     = -71.12   (AIC = -77.12)
 
-診断チェック: 問題は検出されませんでした。
+No diagnostic issues detected.
 ```
 
 If the concentration of the fixed partner (a receptor, a lectin, and so on) is
@@ -102,18 +116,26 @@ res = fit_global(
     fixed={"baseline": 0.0},  # hold at a constant, not estimated
     unit="mM",
 )
-print(res.report())
+# Preserve diagnostic scope in a global fit.
+for diagnostic in res.fit_diagnostics:
+    print("fit", diagnostic.code, diagnostic.severity)
+for name, diagnostics in res.diagnostics_per.items():
+    for diagnostic in diagnostics:
+        print(name, diagnostic.code, diagnostic.severity)
 
-# Pull out one dataset. Its warnings and notes come along with it.
+# Pull out one dataset. Its local and fit-wide diagnostics come along with it.
 sub = res.result_for("oxidized")
-print(sub.report())
 x, y = sub.curve()
+
+# Optional caller-controlled rendering.
+print(res.report())
 ```
 
-`warnings` are problems, `notes` are remarks such as "sharing is what made this
-estimate possible". `GlobalFitResult.warnings` / `.notes` return everything with a
-`[dataset name]` prefix, while `result_for()` returns the ones for that dataset
-(plus any that concern the fit as a whole) without the prefix.
+`fit_diagnostics` contains findings about the complete fit, while
+`diagnostics_per` keeps each dataset's findings scoped to its name. `result_for()`
+combines those fit-wide and local records into its `FitResult`. `warnings`,
+`notes`, `warnings_per`, and `notes_per` are structured severity-filtered
+convenience views; use the scoped collections above when the dataset matters.
 
 ## Weighting
 

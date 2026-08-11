@@ -111,36 +111,31 @@ def test_sharing_bmax_rescues_unidentifiable_dataset():
 
 def test_note_explains_that_sharing_enables_the_estimate():
     res = fit_global(two_state_datasets(), shared=["bmax"], fixed={"baseline": 0.0})
-    assert any("共有をやめると決定不能" in n for n in res.notes)
-    assert any("[reduced]" in n for n in res.notes)
+    assert "shared_amplitude_identifies_location" in {diagnostic.code for diagnostic in res.notes}
 
 
 def test_sharing_suppresses_the_contradictory_saturation_warning():
-    """When bmax is shared, the warning that Kd and Bmax cannot be separated does not apply."""
     res = fit_global(two_state_datasets(), shared=["bmax"], fixed={"baseline": 0.0})
-    assert not any("分離できません" in w for w in res.warnings)
-    # it does appear when nothing is shared
+    assert "not_saturated" not in {diagnostic.code for diagnostic in res.warnings}
     free = fit_global(two_state_datasets(), fixed={"baseline": 0.0})
-    assert any("分離できません" in w for w in free.warnings)
+    assert "not_saturated" in {diagnostic.code for diagnostic in free.warnings}
 
 
 def test_fixed_baseline_suppresses_the_baseline_warning():
-    """When baseline is fixed, the warning that baseline is estimated along with the curve does not apply either."""
     res = fit_global(two_state_datasets(), shared=["bmax"], fixed={"baseline": 0.0})
-    assert not any("baseline が曲線と一緒に推定される" in w for w in res.warnings)
+    assert "no_low_conc" not in {diagnostic.code for diagnostic in res.warnings}
     free = fit_global(two_state_datasets(), shared=["bmax"])
-    assert any("baseline が曲線と一緒に推定される" in w for w in free.warnings)
+    assert "no_low_conc" in {diagnostic.code for diagnostic in free.warnings}
 
 
 def test_actionable_advice_survives_suppression():
-    """Suppression keeps the actionable advice that there are no points near Kd."""
     res = fit_global(two_state_datasets(), shared=["bmax"], fixed={"baseline": 0.0})
-    assert any("Kd 近傍" in w for w in res.warnings)
+    assert "no_points_near_kd" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_warns_and_suggests_sharing_when_bmax_is_free():
     res = fit_global(two_state_datasets(), fixed={"baseline": 0.0})
-    assert any('shared=["bmax"] を検討' in w for w in res.warnings)
+    assert "unshared_amplitude" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_aicc_prefers_sharing_when_bmax_is_truly_common():
@@ -202,7 +197,6 @@ def test_aicc_reaches_the_per_dataset_result():
     sub = res.result_for("reduced")
     assert sub.aicc == res.aicc
     assert sub.aic == res.aic
-    assert "AICc" in sub.report()
 
 
 # --------------------------------------------------------------- API and validation
@@ -222,7 +216,7 @@ def test_report_contains_dataset_names_and_markers():
     res = fit_global(two_state_datasets(noise=0.02, seed=2), shared=["bmax"], fixed={"baseline": 0.0}, unit="mM")
     text = res.report()
     assert "oxidized" in text and "reduced" in text
-    assert "fixed" in text and "共有: bmax" in text and "AIC" in text
+    assert "fixed" in text and "shared: bmax" in text and "AIC" in text
 
 
 def test_rejects_unknown_parameter_name():

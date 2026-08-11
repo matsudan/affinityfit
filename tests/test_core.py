@@ -75,72 +75,58 @@ def test_rejects_more_parameters_than_points():
 
 
 def test_warns_when_saturation_not_reached():
-    """Highest concentration below 3 times Kd -> warning that saturation was not reached."""
     conc, signal = make_data(kd=100.0, cmax_factor=2.0, n=8)
-    res = fit(conc, signal)
-    assert any("飽和に達しておらず" in w for w in res.warnings)
+    assert "not_saturated" in {diagnostic.code for diagnostic in fit(conc, signal).warnings}
 
 
 def test_warns_when_max_conc_below_10x_kd():
     conc, signal = make_data(kd=100.0, cmax_factor=5.0, n=8)
-    res = fit(conc, signal)
-    assert any("10 倍未満" in w for w in res.warnings)
+    assert "weakly_saturated" in {diagnostic.code for diagnostic in fit(conc, signal).warnings}
 
 
 def test_warns_on_too_few_points():
     conc, signal = make_data(kd=10.0, n=5)
-    res = fit(conc, signal)
-    assert any("データ点が 5 点のみ" in w for w in res.warnings)
+    assert "few_points" in {diagnostic.code for diagnostic in fit(conc, signal).warnings}
 
 
 def test_warns_when_no_points_near_kd():
-    """Nothing measured near Kd -> warning that the inflection point is not pinned down."""
     conc = np.array([0.0, 0.05, 0.1, 0.2, 0.5, 100.0, 300.0, 1000.0])
     signal = langmuir(conc, 10.0, 1.0, 0.0)
-    res = fit(conc, signal)
-    assert any("測定点がありません" in w for w in res.warnings)
+    assert "no_points_near_kd" in {diagnostic.code for diagnostic in fit(conc, signal).warnings}
 
 
 def test_warns_when_no_points_below_kd():
-    """An SPR-like design whose lowest concentration, 0.12 uM, is still above Kd = 0.047 uM.
-
-    Every point sits on the saturated side, so Kd is set by extrapolating below the measured range.
-    """
     conc = np.array([0.12, 0.25, 0.5, 1.0, 2.0])
     signal = langmuir(conc, 0.047, 1.0, 0.0)
     res = fit(conc, signal)
     assert conc.min() > res.location
-    assert any("外挿で決まっている" in w for w in res.warnings)
-    assert any("有効数字を増やして報告できません" in w for w in res.warnings)
+    assert "kd_extrapolated" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_no_extrapolation_warning_when_low_points_exist():
     conc, signal = make_data(kd=10.0)
     res = fit(conc, signal)
     assert conc.min() == 0.0
-    assert not any("外挿で決まっている" in w for w in res.warnings)
+    assert "kd_extrapolated" not in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_warns_on_ligand_depletion():
-    """Receptor concentration above one tenth of Kd -> warning that names the model to switch to."""
     conc, signal = make_data(kd=10.0)
-    res = fit(conc, signal, receptor_conc=5.0)
-    assert any("tight_binding" in w for w in res.warnings)
+    assert "ligand_depletion" in {diagnostic.code for diagnostic in fit(conc, signal, receptor_conc=5.0).warnings}
 
 
 def test_no_depletion_warning_when_receptor_is_dilute():
     conc, signal = make_data(kd=10.0)
-    res = fit(conc, signal, receptor_conc=0.1)
-    assert not any("tight_binding" in w for w in res.warnings)
+    assert "ligand_depletion" not in {diagnostic.code for diagnostic in fit(conc, signal, receptor_conc=0.1).warnings}
 
 
-def test_diagnose_uses_model_display_names():
+def test_diagnose_returns_structured_english_diagnostics():
     from affinityfit import michaelis
 
     conc = np.array([0.5, 1.0, 2.0, 4.0, 8.0])
-    msgs = diagnose(conc, np.zeros_like(conc), michaelis, {"km": 1.6, "vmax": 1.0, "baseline": 0.0})
-    assert any("Km=" in m for m in msgs)
-    assert not any("Kd=" in m for m in msgs)
+    diagnostics = diagnose(conc, np.zeros_like(conc), michaelis, {"km": 1.6, "vmax": 1.0, "baseline": 0.0})
+    assert all(diagnostic.message.isascii() for diagnostic in diagnostics)
+    assert "weakly_saturated" in {diagnostic.code for diagnostic in diagnostics}
 
 
 # ------------------------------------------------------------------- CSV loading

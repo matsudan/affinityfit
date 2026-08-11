@@ -13,6 +13,7 @@ import csv
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -69,6 +70,82 @@ class Statistic:
 
 
 @dataclass(frozen=True)
+class Diagnostic:
+    """A machine-readable finding about fit quality or experimental design.
+
+    Attributes:
+        code: Stable identifier for branching in calling programs. It is the API
+            contract; do not branch on `message`.
+        severity: ``"warning"`` for a problem or ``"note"`` for contextual
+            information.
+        message: Concise English explanation for humans. It may be refined without
+            changing `code`.
+    """
+
+    code: str
+    severity: Literal["warning", "note"]
+    message: str
+
+    def __post_init__(self) -> None:
+        if self.severity not in ("warning", "note"):
+            raise ValueError(f"Unsupported diagnostic severity {self.severity!r}; expected 'warning' or 'note'.")
+
+
+_DIAGNOSTIC_MESSAGES = {
+    "amplitude_collapsed": "The fitted amplitude has collapsed to nearly zero, so the fit is effectively flat.",
+    "no_fit": "The model does not capture the data trend; the fitted location is not meaningful.",
+    "poor_fit": (
+        "The fit is poor for a saturation curve; the data may be noisy or the model may not match the mechanism."
+    ),
+    "residual_structure": "Residuals are systematically structured, so the model may not describe the mechanism.",
+    "heteroscedastic": "Residual variance grows with the fitted value; pass pointwise standard deviations with sigma=.",
+    "heteroscedasticity": (
+        "Residual variance grows with the fitted value; pass pointwise standard deviations with sigma=."
+    ),
+    "param_at_bound": (
+        "A fitted parameter is pinned to a model bound and is set by the constraint rather than the data."
+    ),
+    "not_saturated": "Saturation was not reached, so the location and amplitude cannot be identified separately.",
+    "weakly_saturated": "The measured range weakly constrains the plateau, so the location interval may be broad.",
+    "few_points": "There are few data points relative to the number of estimated parameters.",
+    "no_points_near_kd": "No measurements lie near the fitted half-saturation concentration.",
+    "one_point_near_kd": "Only one measurement lies near the fitted half-saturation concentration.",
+    "kd_extrapolated": "All measurements are on the saturated side, so the location is determined by extrapolation.",
+    "no_low_conc": "No sufficiently low-concentration measurement constrains the baseline.",
+    "ligand_depletion": "Ligand depletion can bias the fitted location; use tight_binding for this experiment.",
+    "hill_n_undetermined": "The Hill coefficient interval cannot support a conclusion about cooperativity.",
+    "hill_n_includes_one": "The Hill coefficient interval includes one, so cooperativity cannot be claimed.",
+    "hill_n_below_one": (
+        "The Hill coefficient is significantly below one and may indicate negative cooperativity or heterogeneity."
+    ),
+    "hill_n_above_one": (
+        "The Hill coefficient is significantly above one, but depletion, self-association, or pre-equilibrium "
+        "readout can produce the same shape."
+    ),
+    "limit_undetermined": (
+        "At least one confidence-interval limit is undetermined; report a one-sided limit instead of the "
+        "point estimate."
+    ),
+    "no_degrees_of_freedom": "There are no degrees of freedom, so no confidence interval can be calculated.",
+    "rank_deficient_jacobian": (
+        "The Jacobian is rank-deficient, so the data cannot identify all parameter combinations."
+    ),
+    "bootstrap_insufficient_samples": "Too few bootstrap resamples converged to form a percentile interval.",
+    "bootstrap_failures": "Some bootstrap resamples did not converge, so the interval may be too narrow.",
+    "shared_amplitude_identifies_location": (
+        "Sharing the amplitude makes this otherwise unsaturated dataset identifiable."
+    ),
+    "unshared_amplitude": (
+        "This unsaturated dataset has a free amplitude; share it only when the maximum signal is justified as common."
+    ),
+}
+
+
+def _diagnostic(code: str, severity: Literal["warning", "note"]) -> Diagnostic:
+    return Diagnostic(code=code, severity=severity, message=_DIAGNOSTIC_MESSAGES[code])
+
+
+@dataclass(frozen=True)
 class FitResult:
     """Fitted parameters together with diagnostic messages.
 
@@ -87,9 +164,8 @@ class FitResult:
             compare models on. Lower is better. For a fit over several datasets both
             describe the whole fit, not this dataset alone.
         unit: Name of the concentration unit, used for display only.
-        warnings: Problems detected in the fit.
-        notes: Remarks that are informative rather than problems, such as a shared
-            parameter having enabled an otherwise unidentifiable estimate.
+        diagnostics: Machine-readable fit findings. Branch on `Diagnostic.code`, not
+            on the English `message`.
         statistics: Raw statistic and p-value behind the residual-shape and
             heteroscedasticity checks, for applying your own multiple-comparison
             correction across several fits. See `Statistic`.
@@ -105,8 +181,7 @@ class FitResult:
     aic: float = float("nan")
     aicc: float = float("nan")
     unit: str = ""
-    warnings: tuple[str, ...] = field(default_factory=tuple)
-    notes: tuple[str, ...] = field(default_factory=tuple)
+    diagnostics: tuple[Diagnostic, ...] = field(default_factory=tuple)
     statistics: tuple[Statistic, ...] = field(default_factory=tuple)
 
     @property
@@ -127,6 +202,16 @@ class FitResult:
     def location(self) -> float:
         """Value of the half-saturation parameter, whatever the model calls it."""
         return self.params[self.model.location]
+
+    @property
+    def warnings(self) -> tuple[Diagnostic, ...]:
+        """Warning-severity diagnostics. `diagnostics` is the canonical collection."""
+        return tuple(diagnostic for diagnostic in self.diagnostics if diagnostic.severity == "warning")
+
+    @property
+    def notes(self) -> tuple[Diagnostic, ...]:
+        """Note-severity diagnostics. `diagnostics` is the canonical collection."""
+        return tuple(diagnostic for diagnostic in self.diagnostics if diagnostic.severity == "note")
 
     def predict(self, conc: NDArray[np.float64] | float) -> NDArray[np.float64]:
         """Fitted value at an arbitrary concentration."""
@@ -188,10 +273,12 @@ class FitResult:
         if np.isfinite(self.aicc):
             lines.append(f"{'AICc'.ljust(width)} = {self.aicc:.2f}   (AIC = {self.aic:.2f})")
         lines.append("")
-        lines.extend(f"NOTE: {n}" for n in self.notes)
-        lines.extend(f"WARNING: {w}" for w in self.warnings)
-        if not self.warnings and not self.notes:
-            lines.append("診断チェック: 問題は検出されませんでした。")
+        lines.extend(
+            f"{diagnostic.severity.upper()} [{diagnostic.code}]: {diagnostic.message}"
+            for diagnostic in self.diagnostics
+        )
+        if not self.diagnostics:
+            lines.append("No diagnostic issues detected.")
         return "\n".join(lines)
 
 
@@ -770,7 +857,7 @@ def diagnose(
     fixed_names: tuple[str, ...] = (),
     weighted: bool = False,
     stats_out: list[Statistic] | None = None,
-) -> tuple[str, ...]:
+) -> tuple[Diagnostic, ...]:
     """Judge whether the estimated parameters can be trusted.
 
     Two families of problems are covered. The first is the health of the fit
@@ -802,11 +889,11 @@ def diagnose(
             see `Statistic` and `FitResult.statistics`.
 
     Returns:
-        A tuple of diagnostic messages, empty when nothing was detected.
+        A tuple of machine-readable diagnostics, empty when nothing was detected.
     """
     return tuple(
-        m
-        for _, m in _diagnose_coded(
+        _diagnostic(code, "warning")
+        for code, _ in _diagnose_coded(
             conc, signal, model, params, intervals, receptor_conc, r_squared, fixed_names, weighted, stats_out
         )
     )

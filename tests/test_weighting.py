@@ -166,29 +166,21 @@ def test_weighting_improves_precision_on_proportional_error():
 
 def test_unweighted_fit_on_proportional_error_is_flagged():
     res = fit(CONC, observed(PROPORTIONAL), ci="asymptotic")
-    message = next(w for w in res.warnings if "順位相関" in w)
-    assert "信頼区間が狭く出ることがあります" in message
-
-
-def test_the_advice_names_the_argument_not_a_particular_entry_point():
-    """Users with a single dataset never touch Dataset; they reach for fit(sigma=...)."""
-    res = fit(CONC, observed(PROPORTIONAL), ci="asymptotic")
-    message = next(w for w in res.warnings if "順位相関" in w)
-    assert "sigma=" in message
-    assert "Dataset(" not in message
+    diagnostic = next(diagnostic for diagnostic in res.warnings if diagnostic.code == "heteroscedastic")
+    assert diagnostic.severity == "warning"
+    assert diagnostic.message.isascii()
 
 
 def test_supplying_sigma_suppresses_the_warning():
     res = fit(CONC, observed(PROPORTIONAL), sigma=PROPORTIONAL, ci="asymptotic")
-    assert not any("順位相関" in w for w in res.warnings)
+    assert "heteroscedastic" not in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_homoscedastic_data_is_not_flagged():
-    """The false-alarm rate is around 2%, so at most 1 of the 20 realisations may fire."""
     fired = 0
     for seed in range(20):
         y = TRUTH + np.random.default_rng(seed).normal(0, 0.02, CONC.size)
-        fired += any("順位相関" in w for w in fit(CONC, y, ci="asymptotic").warnings)
+        fired += "heteroscedastic" in {diagnostic.code for diagnostic in fit(CONC, y, ci="asymptotic").warnings}
     assert fired <= 1, fired
 
 
@@ -196,13 +188,11 @@ def test_check_is_skipped_for_short_datasets():
     conc = np.array([0.0, 1.0, 3.0, 10.0, 30.0])
     truth = langmuir(conc, 10.0, 1.0, 0.0)
     y = truth + np.random.default_rng(0).normal(0, 0.3 * truth + 0.01)
-    res = fit(conc, y, ci="asymptotic")
-    assert not any("順位相関" in w for w in res.warnings)
+    assert "heteroscedastic" not in {diagnostic.code for diagnostic in fit(conc, y, ci="asymptotic").warnings}
 
 
 def test_exact_fit_is_not_flagged():
-    res = fit(CONC, TRUTH, ci="asymptotic")
-    assert not any("順位相関" in w for w in res.warnings)
+    assert "heteroscedastic" not in {diagnostic.code for diagnostic in fit(CONC, TRUTH, ci="asymptotic").warnings}
 
 
 # --------------------------------------- combined with a global fit

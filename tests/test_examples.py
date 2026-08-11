@@ -123,7 +123,7 @@ def test_unsaturated_example_still_shows_an_undetermined_limit():
     res = fit(conc, signal, ci="profile")
     assert res.r_squared > 0.99  # 当てはまりは良く見える
     assert res.intervals["kd"].upper is None  # それでも上限は決まらない
-    assert any("飽和に達しておらず" in w for w in res.warnings)
+    assert "not_saturated" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_examples_can_be_regenerated_reproducibly(tmp_path, monkeypatch):

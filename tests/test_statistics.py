@@ -31,15 +31,11 @@ def test_fit_result_carries_all_three_statistics_when_the_checks_apply():
     assert names == {"residual_runs", "residual_autocorrelation", "heteroscedasticity"}
 
 
-def test_statistic_values_match_the_ones_quoted_in_the_warning():
-    """The numbers handed out programmatically must be the same ones printed in the warning text."""
+def test_statistic_values_match_the_diagnostic_code():
     conc, signal = cooperative(n=3.0)
     res = fit(conc, signal, model=langmuir)
-    message = next(w for w in res.warnings if "残差" in w)
-    runs_z = next(s for s in res.statistics if s.name == "residual_runs")
-    autocorr = next(s for s in res.statistics if s.name == "residual_autocorrelation")
-    assert f"z = {runs_z.statistic:.2f}" in message
-    assert f"自己相関 = {autocorr.statistic:.2f}" in message
+    assert "residual_structure" in {diagnostic.code for diagnostic in res.warnings}
+    assert {s.name for s in res.statistics} >= {"residual_runs", "residual_autocorrelation"}
 
 
 def test_residual_runs_p_value_is_the_one_sided_lower_tail():
@@ -116,7 +112,7 @@ def test_heteroscedasticity_p_value_flips_when_the_error_shrinks_instead():
     het = next(s for s in res.statistics if s.name == "heteroscedasticity")
     assert het.statistic < 0
     assert het.p_value is not None and het.p_value > 0.5
-    assert not any("順位相関" in w for w in res.warnings)
+    assert "heteroscedastic" not in {diagnostic.code for diagnostic in res.warnings}
 
 
 # -------------------------------------------------- GlobalFitResult.statistics_per

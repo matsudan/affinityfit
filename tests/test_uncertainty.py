@@ -116,7 +116,7 @@ def test_asymptotic_interval_returns_undetermined_instead_of_infinity():
             assert limit is None or np.isfinite(limit), (seed, limit)
         if not interval.bounded:
             found = True
-            assert any("片側が決定できない" in w for w in res.warnings), seed
+            assert "limit_undetermined" in {diagnostic.code for diagnostic in res.warnings}, seed
     assert found, "no unidentifiable fit came up in any of the realisations"
 
 
@@ -333,8 +333,7 @@ def test_less_noise_restores_both_limits():
 def test_warns_when_a_limit_is_undetermined():
     conc, signal = narrow_range_data(noise=0.02, seed=0)
     res = fit(conc, signal, fixed=FIXED_BASELINE, ci="profile")
-    assert any("片側が決定できない" in w for w in res.warnings)
-    assert any("片側限界として報告" in w for w in res.warnings)
+    assert "limit_undetermined" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_sharing_restores_a_two_sided_interval():
@@ -426,7 +425,7 @@ def test_hill_coefficient_uses_the_interval_for_its_verdict():
     signal = langmuir(conc, 10.0, 1.0, 0.0) + np.random.default_rng(3).normal(0, 0.02, conc.size)
     res = fit(conc, signal, model=hill, ci="profile")
     assert res.intervals["n"].contains(1.0)
-    assert any("1 を含みます" in w for w in res.warnings)
+    assert "hill_n_includes_one" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_global_fit_reports_intervals_per_dataset():

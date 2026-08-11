@@ -28,7 +28,7 @@ from numpy.typing import NDArray
 from scipy import stats
 from scipy.optimize import least_squares
 
-from affinityfit.core import FitResult, Statistic, _diagnose_coded, _reject_non_finite
+from affinityfit.core import Diagnostic, FitResult, Statistic, _diagnose_coded, _diagnostic, _reject_non_finite
 from affinityfit.models import Model, langmuir
 from affinityfit.uncertainty import (
     MIN_BOOTSTRAP_SAMPLES,
@@ -535,10 +535,10 @@ class GlobalFitResult:
             compare models on, whether that is shared against unshared parameters or
             one functional form against another. Lower is better.
         unit: Name of the concentration unit, used for display only.
-        fit_warnings: Problems that concern the fit as a whole rather than one
-            dataset, such as having no degrees of freedom.
-        warnings_per: Problems detected per dataset, without a name prefix.
-        notes_per: Remarks per dataset that are informative rather than problems.
+        fit_diagnostics: Findings that concern the entire fit, such as no degrees of
+            freedom or bootstrap failure.
+        diagnostics_per: Findings per dataset. Each `Diagnostic` has a stable code
+            for programmatic handling and an English human-readable message.
         statistics_per: Raw statistic and p-value per dataset behind the
             residual-shape and heteroscedasticity checks, for applying your own
             multiple-comparison correction across datasets. See `Statistic`.
@@ -558,9 +558,8 @@ class GlobalFitResult:
     aic: float
     aicc: float
     unit: str = ""
-    fit_warnings: tuple[str, ...] = field(default_factory=tuple)
-    warnings_per: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    notes_per: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    fit_diagnostics: tuple[Diagnostic, ...] = field(default_factory=tuple)
+    diagnostics_per: dict[str, tuple[Diagnostic, ...]] = field(default_factory=dict)
     statistics_per: dict[str, tuple[Statistic, ...]] = field(default_factory=dict)
 
     @property
@@ -568,28 +567,43 @@ class GlobalFitResult:
         return tuple(self.params)
 
     @property
-    def warnings(self) -> tuple[str, ...]:
-        """All problems, with per-dataset ones prefixed by `[dataset name]`."""
-        out = list(self.fit_warnings)
-        for name in self.names:
-            out.extend(f"[{name}] {message}" for message in self.warnings_per.get(name, ()))
-        return tuple(out)
+    def warnings(self) -> tuple[Diagnostic, ...]:
+        """All warning diagnostics. Use `diagnostics_per` to retain dataset scope."""
+        return tuple(
+            diagnostic
+            for diagnostics in (self.fit_diagnostics, *self.diagnostics_per.values())
+            for diagnostic in diagnostics
+            if diagnostic.severity == "warning"
+        )
 
     @property
-    def notes(self) -> tuple[str, ...]:
-        """All remarks, with per-dataset ones prefixed by `[dataset name]`."""
-        out: list[str] = []
-        for name in self.names:
-            out.extend(f"[{name}] {message}" for message in self.notes_per.get(name, ()))
-        return tuple(out)
+    def notes(self) -> tuple[Diagnostic, ...]:
+        """All note diagnostics. Use `diagnostics_per` to retain dataset scope."""
+        return tuple(
+            diagnostic
+            for diagnostics in (self.fit_diagnostics, *self.diagnostics_per.values())
+            for diagnostic in diagnostics
+            if diagnostic.severity == "note"
+        )
+
+    @property
+    def warnings_per(self) -> dict[str, tuple[Diagnostic, ...]]:
+        """Warning diagnostics per dataset."""
+        return {
+            name: tuple(diagnostic for diagnostic in diagnostics if diagnostic.severity == "warning")
+            for name, diagnostics in self.diagnostics_per.items()
+        }
+
+    @property
+    def notes_per(self) -> dict[str, tuple[Diagnostic, ...]]:
+        """Note diagnostics per dataset."""
+        return {
+            name: tuple(diagnostic for diagnostic in diagnostics if diagnostic.severity == "note")
+            for name, diagnostics in self.diagnostics_per.items()
+        }
 
     def result_for(self, name: str) -> FitResult:
-        """Extract one dataset as a `FitResult`, diagnostics included.
-
-        The warnings and notes that belong to this dataset come along, together with
-        any that concern the fit as a whole. `FitResult.report()` states that no
-        problem was detected when its warnings are empty, so a discarded diagnostic
-        would turn into a false assurance.
+        """Extract one dataset as a `FitResult` with local and fit-wide diagnostics.
 
         Args:
             name: Dataset name.
@@ -613,29 +627,29 @@ class GlobalFitResult:
             aic=self.aic,
             aicc=self.aicc,
             unit=self.unit,
-            warnings=tuple(self.fit_warnings) + tuple(self.warnings_per.get(name, ())),
-            notes=tuple(self.notes_per.get(name, ())),
+            diagnostics=tuple(self.fit_diagnostics) + tuple(self.diagnostics_per.get(name, ())),
             statistics=self.statistics_per.get(name, ()),
         )
 
     def report(self) -> str:
-        """Render the fitted parameters, diagnostics and AICc as human-readable text."""
+        """Render the fit and structured diagnostics as human-readable text."""
         spec: list[str] = []
         if self.shared:
-            spec.append("共有: " + ", ".join(self.shared))
+            spec.append("shared: " + ", ".join(self.shared))
         if self.fixed:
-            spec.append("固定: " + ", ".join(f"{k}={v:g}" for k, v in self.fixed.items()))
+            spec.append("fixed: " + ", ".join(f"{key}={value:g}" for key, value in self.fixed.items()))
         lines = [
             f"model: {self.model.name}  ({self.model.description})",
-            "グローバルフィット（"
-            + ("; ".join(spec) if spec else "共有・固定なし")
-            + f"）  自由パラメータ {self.n_free_params} 個 / 全 {self.n_points} 点",
-            f"信頼区間: {self.method}",
+            "global fit ("
+            + ("; ".join(spec) if spec else "no shared or fixed parameters")
+            + ")"
+            + f"  {self.n_free_params} free parameters / {self.n_points} total points",
+            f"interval: {self.method}",
             "",
         ]
         for name in self.names:
             lines.append(f"[{name}]  R^2 = {self.r_squared_per[name]:.4f}  (n = {self.n_points_per[name]})")
-            width = max(len(self.model.label(p)) for p in self.model.params)
+            width = max(len(self.model.label(param)) for param in self.model.params)
             for param in self.model.params:
                 label = self.model.label(param).ljust(width)
                 unit = self.unit if param == self.model.location else ""
@@ -645,11 +659,18 @@ class GlobalFitResult:
                     lines.append(f"  {label} = {self.intervals[name][param].format(unit)}")
             lines.append("")
 
-        lines.append(f"全体 R^2 = {self.r_squared:.4f}   AICc = {self.aicc:.2f}   (AIC = {self.aic:.2f})")
-        lines.extend(f"NOTE: {m}" for m in self.notes)
-        lines.extend(f"WARNING: {m}" for m in self.warnings)
-        if not self.notes and not self.warnings:
-            lines.append("診断チェック: 問題は検出されませんでした。")
+        lines.append(f"overall R^2 = {self.r_squared:.4f}   AICc = {self.aicc:.2f}   (AIC = {self.aic:.2f})")
+        lines.extend(
+            f"{diagnostic.severity.upper()} [{diagnostic.code}]: {diagnostic.message}"
+            for diagnostic in self.fit_diagnostics
+        )
+        for name in self.names:
+            lines.extend(
+                f"{diagnostic.severity.upper()} [{name}] [{diagnostic.code}]: {diagnostic.message}"
+                for diagnostic in self.diagnostics_per.get(name, ())
+            )
+        if not self.fit_diagnostics and not any(self.diagnostics_per.values()):
+            lines.append("No diagnostic issues detected.")
         return "\n".join(lines)
 
 
@@ -787,46 +808,26 @@ def fit_global(
     aic = problem.n_points * np.log(ssr / problem.n_points) + 2 * problem.n_slots if ssr > 0 else -np.inf
     aicc = _corrected_aic(float(aic), problem.n_points, problem.n_slots)
 
-    fit_warnings: list[str] = []
-    per_warnings: dict[str, list[str]] = {d.name: [] for d in problem.datasets}
-    per_notes: dict[str, list[str]] = {d.name: [] for d in problem.datasets}
-    per_statistics: dict[str, list[Statistic]] = {d.name: [] for d in problem.datasets}
+    fit_diagnostics: list[Diagnostic] = []
+    per_diagnostics: dict[str, list[Diagnostic]] = {dataset.name: [] for dataset in problem.datasets}
+    per_statistics: dict[str, list[Statistic]] = {dataset.name: [] for dataset in problem.datasets}
 
     # Degree-of-freedom and rank problems do not depend on the interval method, so they belong to the fit as a whole.
     dof = problem.n_points - problem.n_slots
     if dof < 1:
-        fit_warnings.append(
-            f"測定点 {problem.n_points} 点に対して推定パラメータが {problem.n_slots} 個あり、"
-            f"自由度が {dof} です。曲線は定義上すべての点を通るため、信頼区間は算出できません。"
-            "点を増やすか、パラメータを固定・共有してください。"
-        )
+        fit_diagnostics.append(_diagnostic("no_degrees_of_freedom", "warning"))
     elif jac is not None:
         rank = _jacobian_rank(jac)
         if rank < problem.n_slots:
-            fit_warnings.append(
-                f"ヤコビ行列のランクが {rank} で、推定パラメータ {problem.n_slots} 個を"
-                "下回っています。パラメータの組み合わせがデータから区別できず、値は一意に"
-                "決まりません（濃度の種類が少ない、あるいはパラメータが縮退しています）。"
-                "異なる濃度の測定点を増やすか、パラメータを固定・共有してください。"
-            )
+            fit_diagnostics.append(_diagnostic("rank_deficient_jacobian", "warning"))
 
     # The resamples that converge are the ones that were easy to fit, so the number of failures is reported.
     if bootstrap_failures:
         successes = n_boot - bootstrap_failures
-        rate = bootstrap_failures / n_boot
         if successes < MIN_BOOTSTRAP_SAMPLES:
-            fit_warnings.append(
-                f"ブートストラップ {n_boot} 回のうち {bootstrap_failures} 回（{rate:.0%}）が"
-                f"収束せず、成功が {successes} 回で下限 {MIN_BOOTSTRAP_SAMPLES} 回を下回りました。"
-                "百分位区間を作れないため決定不能としています。反復回数を増やすか、"
-                "ci='profile' を使ってください。"
-            )
+            fit_diagnostics.append(_diagnostic("bootstrap_insufficient_samples", "warning"))
         else:
-            fit_warnings.append(
-                f"ブートストラップ {n_boot} 回のうち {bootstrap_failures} 回（{rate:.0%}）が"
-                "収束しませんでした。収束する resample はフィッティングしやすいものに偏るため、"
-                "区間は実際よりも狭い可能性があります。"
-            )
+            fit_diagnostics.append(_diagnostic("bootstrap_failures", "warning"))
 
     # Suppress the remarks whose premise changes under sharing or fixing, so the advice does not contradict itself.
     suppressed: set[str] = set()
@@ -835,44 +836,35 @@ def fit_global(
     if model.baseline is not None and model.baseline in fixed_d:
         suppressed.add("no_low_conc")
 
-    loc_name = model.label(model.location)
-    for d in problem.datasets:
-        loc = params[d.name][model.location]
+    for dataset in problem.datasets:
+        loc = params[dataset.name][model.location]
         codes: set[str] = set()
         dataset_stats: list[Statistic] = []
-        for code, msg in _diagnose_coded(
-            d.conc,
-            d.observed,
+        for code, _ in _diagnose_coded(
+            dataset.conc,
+            dataset.observed,
             model,
-            params[d.name],
-            intervals[d.name],
-            d.receptor_conc,
-            r2_per[d.name],
+            params[dataset.name],
+            intervals[dataset.name],
+            dataset.receptor_conc,
+            r2_per[dataset.name],
             tuple(fixed_d),
-            d.sigma is not None,
+            dataset.sigma is not None,
             dataset_stats,
         ):
             if code not in suppressed:
                 codes.add(code)
-                per_warnings[d.name].append(msg)
-        per_statistics[d.name] = dataset_stats
+                per_diagnostics[dataset.name].append(_diagnostic(code, "warning"))
+        per_statistics[dataset.name] = dataset_stats
 
-        unsaturated = float(d.conc.max()) < 3 * loc
+        unsaturated = float(dataset.conc.max()) < 3 * loc
         # When the fit itself is broken, sharing cannot be credited with making the estimate possible; pairing that
-        # with a warning that the Kd value is meaningless would be contradictory advice.
+        # with a warning that the location value is meaningless would be contradictory advice.
         broken = bool(codes & {"no_fit", "amplitude_collapsed"})
         if unsaturated and model.amplitude in shared_t and not broken:
-            per_notes[d.name].append(
-                f"最高濃度が {loc_name} の 3 倍未満（{d.conc.max():.3g} < {3 * loc:.3g}）ですが、"
-                f"{model.amplitude} を共有しているため {loc_name} を推定できています。"
-                "共有をやめると決定不能になります。"
-            )
+            per_diagnostics[dataset.name].append(_diagnostic("shared_amplitude_identifies_location", "note"))
         elif unsaturated and model.amplitude not in shared_t and len(problem.datasets) > 1:
-            per_warnings[d.name].append(
-                f"最高濃度が {loc_name} の 3 倍未満で、{model.amplitude} が共有されていません。"
-                "他のデータセットと同じ最大シグナルを持つと期待できる場合は "
-                f'shared=["{model.amplitude}"] を検討してください。'
-            )
+            per_diagnostics[dataset.name].append(_diagnostic("unshared_amplitude", "warning"))
 
     return GlobalFitResult(
         model=model,
@@ -889,9 +881,8 @@ def fit_global(
         aic=float(aic),
         aicc=float(aicc),
         unit=unit,
-        fit_warnings=tuple(fit_warnings),
-        warnings_per={name: tuple(messages) for name, messages in per_warnings.items()},
-        notes_per={name: tuple(messages) for name, messages in per_notes.items()},
+        fit_diagnostics=tuple(fit_diagnostics),
+        diagnostics_per={name: tuple(diagnostics) for name, diagnostics in per_diagnostics.items()},
         statistics_per={name: tuple(values) for name, values in per_statistics.items()},
     )
 
