@@ -7,7 +7,7 @@ judge whether the estimate is identifiable from the measured concentration range
 """
 
 from affinityfit.conversions import ki_from_ic50
-from affinityfit.core import FitResult, Statistic, diagnose, load_csv
+from affinityfit.core import Diagnostic, FitResult, Statistic, diagnose, load_csv
 from affinityfit.fitting import Dataset, GlobalFitResult, fit, fit_global
 from affinityfit.models import MODELS, Model, hill, ic50, langmuir, michaelis, tight_binding
 from affinityfit.uncertainty import Interval, format_with_uncertainty
@@ -15,6 +15,7 @@ from affinityfit.uncertainty import Interval, format_with_uncertainty
 __all__ = [
     "MODELS",
     "Dataset",
+    "Diagnostic",
     "FitResult",
     "GlobalFitResult",
     "Interval",

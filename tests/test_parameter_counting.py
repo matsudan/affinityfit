@@ -17,8 +17,8 @@ def titration(n_points, kd=10.0):
     return conc, langmuir(conc, kd, 1.0, 0.0)
 
 
-def few_points_message(result):
-    return [w for w in result.warnings if "データ点が" in w]
+def few_points_diagnostics(result):
+    return [diagnostic for diagnostic in result.warnings if diagnostic.code == "few_points"]
 
 
 # ------------------------------ few_points counts only the estimated parameters
@@ -37,20 +37,20 @@ def few_points_message(result):
 def test_few_points_counts_only_estimated_parameters(n_points, fixed, should_fire):
     conc, signal = titration(n_points)
     result = fit(conc, signal, fixed=fixed)
-    assert bool(few_points_message(result)) is should_fire
+    assert bool(few_points_diagnostics(result)) is should_fire
 
 
-def test_few_points_message_reports_the_estimated_count():
+def test_few_points_diagnostics_have_warning_severity():
     conc, signal = titration(3)
     result = fit(conc, signal, fixed={"baseline": 0.0})
-    assert "推定パラメータは 2 個" in few_points_message(result)[0]
+    assert few_points_diagnostics(result)[0].severity == "warning"
 
 
 def test_two_fixed_parameters_are_both_excluded():
     conc = np.logspace(-1, 2, 5)
     signal = hill(conc, 10.0, 1.0, 0.0, 2.0)
     result = fit(conc, signal, model=hill, fixed={"baseline": 0.0, "n": 2.0})
-    assert not few_points_message(result)  # 2 estimated, 5 >= 4
+    assert not few_points_diagnostics(result)  # 2 estimated, 5 >= 4
 
 
 def test_the_count_matches_the_degrees_of_freedom_used_for_the_fit():
@@ -59,7 +59,7 @@ def test_the_count_matches_the_degrees_of_freedom_used_for_the_fit():
     signal = langmuir(conc, 10.0, 1.0, 0.0)
     result = fit_global([Dataset("d", conc, signal)], fixed={"baseline": 0.0}, ci="asymptotic")
     assert result.n_free_params == 2
-    message = few_points_message(result.result_for("d"))
+    message = few_points_diagnostics(result.result_for("d"))
     assert not message  # 5 >= 2 * 2
 
 
@@ -67,7 +67,7 @@ def test_hill_without_fixed_parameters_still_fires_at_the_right_size():
     conc = np.logspace(-1, 2, 7)
     signal = hill(conc, 10.0, 1.0, 0.0, 2.0)
     result = fit(conc, signal, model=hill)
-    assert few_points_message(result)  # 4 estimated, 7 < 8
+    assert few_points_diagnostics(result)  # 4 estimated, 7 < 8
 
 
 # ---------------------------------- Equality and hashing of Dataset

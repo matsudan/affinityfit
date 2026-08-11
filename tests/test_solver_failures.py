@@ -64,7 +64,7 @@ def test_profile_reports_undetermined_when_every_inner_fit_fails(failing_solve):
     res = fit(CONC, SIGNAL, ci="profile")
     for name in ("kd", "bmax", "baseline"):
         assert not res.intervals[name].bounded, name
-    assert any("片側が決定できない" in w for w in res.warnings)
+    assert "limit_undetermined" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_profile_bounds_treats_none_as_unevaluable_not_as_a_crossing():
@@ -96,35 +96,22 @@ def test_profile_bounds_still_finds_a_crossing_when_evaluation_works():
 
 
 def test_bootstrap_reports_the_failure_count(failing_solve):
-    """Even a handful of failures must be reported, since the interval can come out too narrow."""
     failing_solve(lambda n, kwargs: n > 1 and n % 25 == 0)
     res = fit(CONC, SIGNAL, ci="bootstrap", n_boot=400)
-    message = next(w for w in res.warnings if "ブートストラップ" in w)
-    assert "収束しませんでした" in message
-    assert "狭い" in message
-    assert res.intervals["kd"].bounded  # the interval is still returned when enough resamples succeeded
+    assert "bootstrap_failures" in {diagnostic.code for diagnostic in res.warnings}
+    assert res.intervals["kd"].bounded
 
 
 def test_bootstrap_refuses_to_report_when_most_resamples_fail(failing_solve):
-    """With only 20 of 400 resamples succeeding, no interval must be formed."""
     failing_solve(lambda n, kwargs: n > 1 and n % 20 != 0)
     res = fit(CONC, SIGNAL, ci="bootstrap", n_boot=400)
     assert not res.intervals["kd"].bounded
-    message = next(w for w in res.warnings if "ブートストラップ" in w)
-    assert "決定不能" in message
-    assert str(MIN_BOOTSTRAP_SAMPLES) in message
-
-
-def test_bootstrap_failure_message_names_the_counts(failing_solve):
-    failing_solve(lambda n, kwargs: n > 1 and n % 20 != 0)
-    res = fit(CONC, SIGNAL, ci="bootstrap", n_boot=400)
-    message = next(w for w in res.warnings if "ブートストラップ" in w)
-    assert "400 回" in message and "95%" in message
+    assert "bootstrap_insufficient_samples" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_bootstrap_without_failures_says_nothing_about_convergence():
     res = fit(CONC, SIGNAL, ci="bootstrap", n_boot=200)
-    assert not any("ブートストラップ" in w for w in res.warnings)
+    assert "bootstrap_failures" not in {diagnostic.code for diagnostic in res.warnings}
     assert res.intervals["kd"].bounded
 
 

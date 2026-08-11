@@ -171,7 +171,7 @@ def test_no_spurious_bound_warning_for_small_kd():
     for kd in (1e-4, 1e-6, 1e-12, 1e-16):
         conc, signal = titration(kd)
         res = fit(conc, signal, ci="asymptotic")
-        assert not any("張り付いています" in w for w in res.warnings), kd
+        assert "param_at_bound" not in {diagnostic.code for diagnostic in res.warnings}, kd
 
 
 def test_bound_warning_still_fires_on_a_genuinely_pinned_parameter():
@@ -179,7 +179,7 @@ def test_bound_warning_still_fires_on_a_genuinely_pinned_parameter():
     step = np.where(conc < 10.0, 0.0, 1.0) + np.random.default_rng(1).normal(0, 0.01, conc.size)
     res = fit(conc, step, model=hill)
     assert res.params["n"] == pytest.approx(hill.bounds["n"][1])
-    assert any("張り付いています" in w for w in res.warnings)
+    assert "param_at_bound" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_log_scale_parameters_survive_a_runaway_without_overflowing():

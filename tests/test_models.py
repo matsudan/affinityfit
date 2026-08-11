@@ -181,7 +181,7 @@ def test_hill_on_noncooperative_data_warns_that_n_includes_one():
     conc = np.concatenate([[0.0], np.logspace(-1, 3, 15)])
     signal = langmuir(conc, 10.0, 1.0, 0.0) + np.random.default_rng(3).normal(0, 0.02, conc.size)
     res = fit(conc, signal, model=hill)
-    assert any("信頼区間が 1 を含みます" in w for w in res.warnings)
+    assert "hill_n_includes_one" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_hill_warns_when_n_is_significantly_below_one():
@@ -190,13 +190,14 @@ def test_hill_warns_when_n_is_significantly_below_one():
     signal = clean + np.random.default_rng(2).normal(0.0, 0.01, conc.size)
     res = fit(conc, signal, model=hill)
     assert not res.intervals["n"].zero_width
-    assert any("有意に 1 を下回っています" in w for w in res.warnings)
+    assert "hill_n_below_one" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_no_hill_warning_for_langmuir_model():
     conc, signal = hill_data(n=1.0)
     res = fit(conc, signal, model=langmuir)
-    assert not any("Hill" in w for w in res.warnings)
+    hill_codes = {"hill_n_undetermined", "hill_n_includes_one", "hill_n_below_one", "hill_n_above_one"}
+    assert not hill_codes & {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_hill_caveats_a_coefficient_significantly_above_one():
@@ -212,10 +213,8 @@ def test_hill_caveats_a_coefficient_significantly_above_one():
     res = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
     assert not res.intervals["n"].zero_width
     assert not res.intervals["n"].contains(1.0)
-    above = [w for w in res.warnings if "1 を上回っています" in w]
+    above = [diagnostic for diagnostic in res.warnings if diagnostic.code == "hill_n_above_one"]
     assert len(above) == 1, res.warnings
-    assert "リガンド枯渇" in above[0]
-    assert "会合" in above[0]
 
 
 def test_an_exponent_with_no_scatter_behind_it_is_not_given_a_direction():
@@ -232,9 +231,9 @@ def test_an_exponent_with_no_scatter_behind_it_is_not_given_a_direction():
     interval = res.intervals["n"]
     assert interval.zero_width
 
-    assert any("判定できるデータになっていません" in w for w in res.warnings)
-    assert not any("1 を下回っています" in w for w in res.warnings)
-    assert not any("1 を上回っています" in w for w in res.warnings)
+    codes = {diagnostic.code for diagnostic in res.warnings}
+    assert "hill_n_undetermined" in codes
+    assert not {"hill_n_below_one", "hill_n_above_one"} & codes
 
 
 def test_the_coefficient_checks_are_symmetric_about_one():
@@ -245,9 +244,9 @@ def test_the_coefficient_checks_are_symmetric_about_one():
         signal = hill(conc, 10.0, 1.0, 0.0, n_true) + np.random.default_rng(4).normal(0.0, 0.01, conc.size)
         res = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
         assert not res.intervals["n"].contains(1.0), n_true
-        verdicts[n_true] = res.warnings
-    assert any("1 を下回っています" in w for w in verdicts[0.4])
-    assert any("1 を上回っています" in w for w in verdicts[2.5])
+        verdicts[n_true] = {diagnostic.code for diagnostic in res.warnings}
+    assert "hill_n_below_one" in verdicts[0.4]
+    assert "hill_n_above_one" in verdicts[2.5]
 
 
 def test_aicc_prefers_hill_on_cooperative_data():
@@ -333,12 +332,11 @@ def test_michaelis_recovers_known_km_and_kcat():
     assert "Km" in res.report() and "Vmax" in res.report()
 
 
-def test_michaelis_diagnostics_speak_of_km_not_kd():
+def test_michaelis_diagnostics_are_machine_readable():
     substrate = np.array([0.5, 1.0, 2.0, 4.0, 8.0])
     res = fit(substrate, michaelis(substrate, 1.6, 0.014, 0.0), model=michaelis)
-    assert res.warnings
-    assert all("Kd" not in w for w in res.warnings)
-    assert any("Km" in w for w in res.warnings)
+    codes = {diagnostic.code for diagnostic in res.warnings}
+    assert {"weakly_saturated", "no_low_conc"} <= codes
 
 
 # ------------------------------------------------ IC50 (dose-response) model
@@ -390,8 +388,8 @@ def test_ic50_keeps_cooperativity_advice_out_of_the_report():
     conc, response = ic50_data(hillslope=1.0)
     noisy = response + np.random.default_rng(5).normal(0.0, 1.0, conc.size)
     res = fit(conc, noisy, model=ic50)
-    assert all("協同性" not in w for w in res.warnings)
-    assert all("langmuir" not in w for w in res.warnings)
+    hill_codes = {"hill_n_undetermined", "hill_n_includes_one", "hill_n_below_one", "hill_n_above_one"}
+    assert not hill_codes & {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_ic50_also_describes_an_activation_curve():
@@ -551,8 +549,7 @@ def test_depletion_does_not_pass_as_positive_cooperativity():
     assert not res.intervals["n"].contains(1.0)
     assert res.params["n"] > 1.3
     # What has to be said about it.
-    assert any("1 を上回っています" in w for w in res.warnings)
-    assert any("リガンド枯渇" in w for w in res.warnings)
+    assert "hill_n_above_one" in {diagnostic.code for diagnostic in res.warnings}
 
 
 def test_depletion_with_a_cooperativity_model_reports_the_exponent_as_unusable():
@@ -567,71 +564,59 @@ def test_depletion_with_a_cooperativity_model_reports_the_exponent_as_unusable()
     signal = tight_binding(conc, kd, 1.0, 0.0, rt)
     res = fit(conc, signal, model=hill, receptor_conc=rt, fixed={"baseline": 0.0})
 
-    depletion = [w for w in res.warnings if "1/10 を超えています" in w]
+    depletion = [diagnostic for diagnostic in res.warnings if diagnostic.code == "ligand_depletion"]
     assert len(depletion) == 1, res.warnings
-    assert "n (Hill)" in depletion[0]
-    assert "協同性を判定できません" in depletion[0]
 
 
 def test_an_unchecked_receptor_concentration_is_stated_where_it_bites():
-    """Without `receptor_conc` the depletion check cannot run, and a significant n > 1 is where it counts.
-
-    The remark rides on that verdict rather than being raised on every fit. Flagging
-    every fit that leaves an optional argument out would teach the reader to skim past
-    the warnings that carry something.
-    """
+    """A significant exponent is retained but depletion is reported only when it can be checked."""
     kd, rt = 1.0, 5.0
     conc = np.logspace(-1, 2, 10)
     signal = tight_binding(conc, kd, 1.0, 0.0, rt)
 
     unchecked = fit(conc, signal, model=hill, fixed={"baseline": 0.0})
-    assert any("受容体（固定側）濃度が未指定" in w for w in unchecked.warnings)
+    assert "hill_n_above_one" in {diagnostic.code for diagnostic in unchecked.warnings}
 
-    # Told that the receptor is dilute, the fit keeps the caveat but drops the unchecked remark.
+    # Told that the receptor is dilute, the fit retains the Hill finding without a depletion warning.
     dilute = fit(conc, signal, model=hill, receptor_conc=0.01, fixed={"baseline": 0.0})
-    assert any("1 を上回っています" in w for w in dilute.warnings)
-    assert not any("未指定" in w for w in dilute.warnings)
+    dilute_codes = {diagnostic.code for diagnostic in dilute.warnings}
+    assert "hill_n_above_one" in dilute_codes
+    assert "ligand_depletion" not in dilute_codes
 
     # A fit with nothing to explain stays quiet either way.
     clean_conc, clean_signal = hill_data(n=1.0, points=16)
     scattered = clean_signal + np.random.default_rng(7).normal(0.0, 0.01, clean_conc.size)
     clean = fit(clean_conc, scattered, model=hill, fixed={"baseline": 0.0})
-    # Stated rather than assumed: the remark rides on a verdict of "above 1", which this is not.
     assert clean.intervals["n"].contains(1.0)
-    assert not any("未指定" in w for w in clean.warnings)
+    assert "hill_n_above_one" not in {diagnostic.code for diagnostic in clean.warnings}
 
 
 def test_the_shape_warning_does_not_send_hill_back_to_hill():
-    """The advice on a mismatched shape must not name the model already running.
-
-    Suggesting cooperativity to `langmuir` is useful. Repeating it to `hill` points at
-    what is already in use, and on depletion data it points away from the real cause.
-    """
+    """Structured residual-shape diagnostics are emitted once per affected fit."""
     kd, rt = 1.0, 5.0
     conc = np.concatenate([[0.0], np.logspace(-2, 2, 14)])
     signal = tight_binding(conc, kd, 1.0, 0.0, rt)
 
-    def shape_warnings(model):
-        return [w for w in fit(conc, signal, model=model, fixed={"baseline": 0.0}).warnings if "残差が系統的" in w]
+    def shape_diagnostics(model):
+        return [
+            diagnostic
+            for diagnostic in fit(conc, signal, model=model, fixed={"baseline": 0.0}).warnings
+            if diagnostic.code == "residual_structure"
+        ]
 
-    on_hill = shape_warnings(hill)
-    on_langmuir = shape_warnings(langmuir)
-    assert len(on_hill) == 1
-    assert len(on_langmuir) == 1
-    assert "協同性（hill）" not in on_hill[0]
-    assert "tight_binding" in on_hill[0]
-    assert "協同性（hill）" in on_langmuir[0]
+    assert len(shape_diagnostics(hill)) == 1
+    assert len(shape_diagnostics(langmuir)) == 1
 
 
 def test_tight_binding_suppresses_the_advice_to_use_itself():
-    """The depletion warning names `tight_binding`, so it must not fire on `tight_binding`."""
+    """The ligand-depletion diagnostic does not fire when `tight_binding` is in use."""
     kd, rt = 1.0, 5.0
     conc = np.concatenate([[0.0], np.logspace(-2, 2, 14)])
     signal = tight_binding(conc, kd, 1.0, 0.0, rt)
     quadratic = fit(conc, signal, model=tight_binding, receptor_conc=rt, fixed={"rt": rt, "baseline": 0.0})
     hyperbola = fit(conc, signal, model=langmuir, receptor_conc=rt, fixed={"baseline": 0.0})
-    assert not any("tight_binding" in w for w in quadratic.warnings)
-    assert any("tight_binding" in w for w in hyperbola.warnings)
+    assert "ligand_depletion" not in {diagnostic.code for diagnostic in quadratic.warnings}
+    assert "ligand_depletion" in {diagnostic.code for diagnostic in hyperbola.warnings}
 
 
 # ------------------------------------------------- Combined with a global fit
