@@ -58,6 +58,23 @@ def test_unit_change_does_not_change_the_answer():
     assert results["M"] == pytest.approx(kd_molar, rel=1e-6)
 
 
+def test_profile_interval_is_scale_invariant_for_noisy_high_affinity_data():
+    """Profile endpoints stay nonzero and scale-invariant for a noisy picomolar experiment."""
+    kd_molar = 3.2e-11
+    conc, clean = titration(kd_molar, points=14)
+    signal = clean + np.random.default_rng(0).normal(0, 0.02, conc.size)
+    intervals = {}
+    for name, factor in (("M", 1.0), ("nM", 1e9), ("pM", 1e12)):
+        res = fit(conc * factor, signal, unit=name, ci="profile")
+        interval = res.intervals["kd"]
+        assert interval.lower is not None and interval.upper is not None
+        assert interval.lower < interval.point < interval.upper
+        intervals[name] = tuple(value / factor for value in (interval.lower, interval.point, interval.upper))
+
+    for interval in intervals.values():
+        assert interval == pytest.approx(intervals["M"], rel=1e-6)
+
+
 @pytest.mark.parametrize("km", [1e-12, 1e-6, 1.0])
 def test_michaelis_is_also_scale_invariant(km):
     conc, signal = titration(km, bmax=0.014, model=michaelis)
