@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import math
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -69,20 +70,63 @@ class Statistic:
     alpha: float
 
 
+class DiagnosticCode(StrEnum):
+    """Every stable code a `Diagnostic` can carry.
+
+    Members are plain strings (`DiagnosticCode.NOT_SATURATED == "not_saturated"`), so
+    existing comparisons, set membership, and string methods on `Diagnostic.code`
+    keep working. Import this enum to discover every code the library can emit,
+    for example to branch exhaustively or to build a lookup table of your own:
+
+    ```python
+    from affinityfit import DiagnosticCode
+
+    list(DiagnosticCode)  # every code this library can emit
+    ```
+    """
+
+    AMPLITUDE_COLLAPSED = "amplitude_collapsed"
+    NO_FIT = "no_fit"
+    POOR_FIT = "poor_fit"
+    RESIDUAL_STRUCTURE = "residual_structure"
+    HETEROSCEDASTIC = "heteroscedastic"
+    PARAM_AT_BOUND = "param_at_bound"
+    NOT_SATURATED = "not_saturated"
+    WEAKLY_SATURATED = "weakly_saturated"
+    FEW_POINTS = "few_points"
+    NO_POINTS_NEAR_KD = "no_points_near_kd"
+    ONE_POINT_NEAR_KD = "one_point_near_kd"
+    KD_EXTRAPOLATED = "kd_extrapolated"
+    NO_LOW_CONC = "no_low_conc"
+    LIGAND_DEPLETION = "ligand_depletion"
+    HILL_N_UNDETERMINED = "hill_n_undetermined"
+    HILL_N_INCLUDES_ONE = "hill_n_includes_one"
+    HILL_N_BELOW_ONE = "hill_n_below_one"
+    HILL_N_ABOVE_ONE = "hill_n_above_one"
+    LIMIT_UNDETERMINED = "limit_undetermined"
+    NO_DEGREES_OF_FREEDOM = "no_degrees_of_freedom"
+    RANK_DEFICIENT_JACOBIAN = "rank_deficient_jacobian"
+    BOOTSTRAP_INSUFFICIENT_SAMPLES = "bootstrap_insufficient_samples"
+    BOOTSTRAP_FAILURES = "bootstrap_failures"
+    SHARED_AMPLITUDE_IDENTIFIES_LOCATION = "shared_amplitude_identifies_location"
+    UNSHARED_AMPLITUDE = "unshared_amplitude"
+
+
 @dataclass(frozen=True)
 class Diagnostic:
     """A machine-readable finding about fit quality or experimental design.
 
     Attributes:
         code: Stable identifier for branching in calling programs. It is the API
-            contract; do not branch on `message`.
+            contract; do not branch on `message`. See `DiagnosticCode` for every
+            value this can take.
         severity: ``"warning"`` for a problem or ``"note"`` for contextual
             information.
         message: Concise English explanation for humans. It may be refined without
             changing `code`.
     """
 
-    code: str
+    code: DiagnosticCode
     severity: Literal["warning", "note"]
     message: str
 
@@ -91,57 +135,78 @@ class Diagnostic:
             raise ValueError(f"Unsupported diagnostic severity {self.severity!r}; expected 'warning' or 'note'.")
 
 
-_DIAGNOSTIC_MESSAGES = {
-    "amplitude_collapsed": "The fitted amplitude has collapsed to nearly zero, so the fit is effectively flat.",
-    "no_fit": "The model does not capture the data trend; the fitted location is not meaningful.",
-    "poor_fit": (
+_DIAGNOSTIC_MESSAGES: dict[DiagnosticCode, str] = {
+    DiagnosticCode.AMPLITUDE_COLLAPSED: (
+        "The fitted amplitude has collapsed to nearly zero, so the fit is effectively flat."
+    ),
+    DiagnosticCode.NO_FIT: "The model does not capture the data trend; the fitted location is not meaningful.",
+    DiagnosticCode.POOR_FIT: (
         "The fit is poor for a saturation curve; the data may be noisy or the model may not match the mechanism."
     ),
-    "residual_structure": "Residuals are systematically structured, so the model may not describe the mechanism.",
-    "heteroscedastic": "Residual variance grows with the fitted value; pass pointwise standard deviations with sigma=.",
-    "heteroscedasticity": (
+    DiagnosticCode.RESIDUAL_STRUCTURE: (
+        "Residuals are systematically structured, so the model may not describe the mechanism."
+    ),
+    DiagnosticCode.HETEROSCEDASTIC: (
         "Residual variance grows with the fitted value; pass pointwise standard deviations with sigma=."
     ),
-    "param_at_bound": (
+    DiagnosticCode.PARAM_AT_BOUND: (
         "A fitted parameter is pinned to a model bound and is set by the constraint rather than the data."
     ),
-    "not_saturated": "Saturation was not reached, so the location and amplitude cannot be identified separately.",
-    "weakly_saturated": "The measured range weakly constrains the plateau, so the location interval may be broad.",
-    "few_points": "There are few data points relative to the number of estimated parameters.",
-    "no_points_near_kd": "No measurements lie near the fitted half-saturation concentration.",
-    "one_point_near_kd": "Only one measurement lies near the fitted half-saturation concentration.",
-    "kd_extrapolated": "All measurements are on the saturated side, so the location is determined by extrapolation.",
-    "no_low_conc": "No sufficiently low-concentration measurement constrains the baseline.",
-    "ligand_depletion": "Ligand depletion can bias the fitted location; use tight_binding for this experiment.",
-    "hill_n_undetermined": "The Hill coefficient interval cannot support a conclusion about cooperativity.",
-    "hill_n_includes_one": "The Hill coefficient interval includes one, so cooperativity cannot be claimed.",
-    "hill_n_below_one": (
+    DiagnosticCode.NOT_SATURATED: (
+        "Saturation was not reached, so the location and amplitude cannot be identified separately."
+    ),
+    DiagnosticCode.WEAKLY_SATURATED: (
+        "The measured range weakly constrains the plateau, so the location interval may be broad."
+    ),
+    DiagnosticCode.FEW_POINTS: "There are few data points relative to the number of estimated parameters.",
+    DiagnosticCode.NO_POINTS_NEAR_KD: "No measurements lie near the fitted half-saturation concentration.",
+    DiagnosticCode.ONE_POINT_NEAR_KD: "Only one measurement lies near the fitted half-saturation concentration.",
+    DiagnosticCode.KD_EXTRAPOLATED: (
+        "All measurements are on the saturated side, so the location is determined by extrapolation."
+    ),
+    DiagnosticCode.NO_LOW_CONC: "No sufficiently low-concentration measurement constrains the baseline.",
+    DiagnosticCode.LIGAND_DEPLETION: (
+        "Ligand depletion can bias the fitted location; use tight_binding for this experiment."
+    ),
+    DiagnosticCode.HILL_N_UNDETERMINED: (
+        "The Hill coefficient interval cannot support a conclusion about cooperativity."
+    ),
+    DiagnosticCode.HILL_N_INCLUDES_ONE: (
+        "The Hill coefficient interval includes one, so cooperativity cannot be claimed."
+    ),
+    DiagnosticCode.HILL_N_BELOW_ONE: (
         "The Hill coefficient is significantly below one and may indicate negative cooperativity or heterogeneity."
     ),
-    "hill_n_above_one": (
+    DiagnosticCode.HILL_N_ABOVE_ONE: (
         "The Hill coefficient is significantly above one, but depletion, self-association, or pre-equilibrium "
         "readout can produce the same shape."
     ),
-    "limit_undetermined": (
+    DiagnosticCode.LIMIT_UNDETERMINED: (
         "At least one confidence-interval limit is undetermined; report a one-sided limit instead of the "
         "point estimate."
     ),
-    "no_degrees_of_freedom": "There are no degrees of freedom, so no confidence interval can be calculated.",
-    "rank_deficient_jacobian": (
+    DiagnosticCode.NO_DEGREES_OF_FREEDOM: (
+        "There are no degrees of freedom, so no confidence interval can be calculated."
+    ),
+    DiagnosticCode.RANK_DEFICIENT_JACOBIAN: (
         "The Jacobian is rank-deficient, so the data cannot identify all parameter combinations."
     ),
-    "bootstrap_insufficient_samples": "Too few bootstrap resamples converged to form a percentile interval.",
-    "bootstrap_failures": "Some bootstrap resamples did not converge, so the interval may be too narrow.",
-    "shared_amplitude_identifies_location": (
+    DiagnosticCode.BOOTSTRAP_INSUFFICIENT_SAMPLES: (
+        "Too few bootstrap resamples converged to form a percentile interval."
+    ),
+    DiagnosticCode.BOOTSTRAP_FAILURES: (
+        "Some bootstrap resamples did not converge, so the interval may be too narrow."
+    ),
+    DiagnosticCode.SHARED_AMPLITUDE_IDENTIFIES_LOCATION: (
         "Sharing the amplitude makes this otherwise unsaturated dataset identifiable."
     ),
-    "unshared_amplitude": (
+    DiagnosticCode.UNSHARED_AMPLITUDE: (
         "This unsaturated dataset has a free amplitude; share it only when the maximum signal is justified as common."
     ),
 }
 
 
-def _diagnostic(code: str, severity: Literal["warning", "note"]) -> Diagnostic:
+def _diagnostic(code: DiagnosticCode, severity: Literal["warning", "note"]) -> Diagnostic:
     return Diagnostic(code=code, severity=severity, message=_DIAGNOSTIC_MESSAGES[code])
 
 
@@ -397,7 +462,7 @@ def _residual_structure(
     model: Model,
     params: dict[str, float],
     stats_out: list[Statistic] | None = None,
-) -> list[tuple[str, str]]:
+) -> list[tuple[DiagnosticCode, str]]:
     """Test whether the residuals are systematically arranged along the curve.
 
     A model with the wrong shape leaves long stretches of same-signed residuals even
@@ -453,7 +518,7 @@ def _residual_structure(
             )
         return [
             (
-                "residual_structure",
+                DiagnosticCode.RESIDUAL_STRUCTURE,
                 f"残差 {nonzero.size} 点すべてが同じ符号です。フィッティングした曲線がデータ全体から"
                 "一方向にずれており、モデルが機構に合っていません。",
             )
@@ -491,7 +556,7 @@ def _residual_structure(
     )
     return [
         (
-            "residual_structure",
+            DiagnosticCode.RESIDUAL_STRUCTURE,
             f"残差が系統的に偏っています（符号の連 {runs} / 期待 {mean_runs:.1f}, z = {z:.2f}、"
             f"隣接残差の自己相関 = {autocorr:.2f}）。符号の並び: {pattern}。"
             "決定係数が高くてもモデルの形が機構に合っていません。" + suggestion,
@@ -505,7 +570,7 @@ def _heteroscedastic(
     model: Model,
     params: dict[str, float],
     stats_out: list[Statistic] | None = None,
-) -> list[tuple[str, str]]:
+) -> list[tuple[DiagnosticCode, str]]:
     """Test whether the size of the residuals grows with the fitted value.
 
     Unweighted least squares assumes the measurement error is the same size at every
@@ -544,7 +609,7 @@ def _heteroscedastic(
         return []
     return [
         (
-            "heteroscedastic",
+            DiagnosticCode.HETEROSCEDASTIC,
             f"残差の大きさがフィッティング値とともに増えています（順位相関 = {rho:.2f}）。"
             "誤差の大きさが点ごとに違うため、全点を等価値に扱うフィッティングでは精度が落ち、"
             "信頼区間が狭く出ることがあります。蛍光・発光・吸光のように信号に比例した"
@@ -564,7 +629,7 @@ def _diagnose_coded(
     fixed_names: tuple[str, ...] = (),
     weighted: bool = False,
     stats_out: list[Statistic] | None = None,
-) -> tuple[tuple[str, str], ...]:
+) -> tuple[tuple[DiagnosticCode, str], ...]:
     """Return diagnostics as `(code, message)` pairs.
 
     The code lets callers filter messages. For example, when the amplitude is shared
@@ -598,7 +663,7 @@ def _diagnose_coded(
     loc_name = model.label(model.location)
     amp_name = model.label(model.amplitude)
 
-    msgs: list[tuple[str, str]] = []
+    msgs: list[tuple[DiagnosticCode, str]] = []
     cmax = float(conc.max())
     cmin = float(conc.min())
     n_points = len(conc)
@@ -622,7 +687,7 @@ def _diagnose_coded(
         )
         msgs.append(
             (
-                "amplitude_collapsed",
+                DiagnosticCode.AMPLITUDE_COLLAPSED,
                 f"{amp_name} = {amplitude:.3g} がほぼ 0 に潰れています。フィッティングは実質的に水平線です。{detail}",
             )
         )
@@ -631,7 +696,7 @@ def _diagnose_coded(
         if r_squared < 0.5:
             msgs.append(
                 (
-                    "no_fit",
+                    DiagnosticCode.NO_FIT,
                     f"決定係数 R^2 = {r_squared:.3g} が低く、モデルがデータの傾向を捉えていません。"
                     f"{loc_name} の値に意味はありません。モデルの選択（データの増減の向き、"
                     "協同性、別の機構）を確認してください。",
@@ -640,7 +705,7 @@ def _diagnose_coded(
         elif r_squared < 0.9:
             msgs.append(
                 (
-                    "poor_fit",
+                    DiagnosticCode.POOR_FIT,
                     f"決定係数 R^2 = {r_squared:.3g} は飽和曲線としては低めです。"
                     "ノイズが大きいか、モデルが機構に合っていない可能性があります。",
                 )
@@ -659,7 +724,7 @@ def _diagnose_coded(
     for name in model.params:
         if name in (fixed_names or ()):
             continue
-        if name == model.amplitude and "amplitude_collapsed" in already:
+        if name == model.amplitude and DiagnosticCode.AMPLITUDE_COLLAPSED in already:
             continue
         value = float(params[name])
         for bound, side in ((model.lower(name), "下限"), (model.upper(name), "上限")):
@@ -667,7 +732,7 @@ def _diagnose_coded(
                 continue
             msgs.append(
                 (
-                    "param_at_bound",
+                    DiagnosticCode.PARAM_AT_BOUND,
                     f"{model.label(name)} = {value:.4g} が許容範囲の{side}"
                     f"（{bound:g}）に張り付いています。この値は推定結果ではなく制約の"
                     "産物なので、そのまま報告できません。モデルの選択か測定範囲を"
@@ -679,7 +744,7 @@ def _diagnose_coded(
     if cmax < 3 * loc:
         msgs.append(
             (
-                "not_saturated",
+                DiagnosticCode.NOT_SATURATED,
                 f"最高濃度 {cmax:.3g} が {loc_name}={loc:.3g} の 3 倍未満です。飽和に達しておらず "
                 f"{loc_name} と {amp_name} を分離できません（結論は「{loc_name} > {cmax:.3g}」に留めるべきです）。",
             )
@@ -687,7 +752,7 @@ def _diagnose_coded(
     elif cmax < 10 * loc:
         msgs.append(
             (
-                "weakly_saturated",
+                DiagnosticCode.WEAKLY_SATURATED,
                 f"最高濃度 {cmax:.3g} が {loc_name}={loc:.3g} の 10 倍未満です。{amp_name} の推定が "
                 f"不安定で、{loc_name} の信頼区間も広がりがちです。",
             )
@@ -696,7 +761,7 @@ def _diagnose_coded(
     if n_points < 2 * n_estimated:
         msgs.append(
             (
-                "few_points",
+                DiagnosticCode.FEW_POINTS,
                 f"データ点が {n_points} 点のみです（推定パラメータは {n_estimated} 個）。"
                 "信頼区間は参考値として扱ってください。",
             )
@@ -706,7 +771,7 @@ def _diagnose_coded(
     if near == 0:
         msgs.append(
             (
-                "no_points_near_kd",
+                DiagnosticCode.NO_POINTS_NEAR_KD,
                 f"{loc_name} 近傍（{loc / 3:.3g} 〜 {loc * 3:.3g}）に測定点がありません。"
                 f"この範囲に点を追加すると {loc_name} の精度が最も改善します。",
             )
@@ -714,7 +779,7 @@ def _diagnose_coded(
     elif near == 1:
         msgs.append(
             (
-                "one_point_near_kd",
+                DiagnosticCode.ONE_POINT_NEAR_KD,
                 f"{loc_name} 近傍（{loc / 3:.3g} 〜 {loc * 3:.3g}）の測定点が 1 点だけです。"
                 "曲線の変曲点が 1 点に依存しています。",
             )
@@ -723,7 +788,7 @@ def _diagnose_coded(
     if cmin > loc:
         msgs.append(
             (
-                "kd_extrapolated",
+                DiagnosticCode.KD_EXTRAPOLATED,
                 f"最低濃度 {cmin:.3g} が既に {loc_name}={loc:.3g} を上回っており、全点が飽和側に"
                 f"あります。{loc_name} は測定範囲より下への外挿で決まっているため、有効数字を"
                 f"増やして報告できません。{loc_name} 以下の濃度点を追加してください。",
@@ -733,7 +798,7 @@ def _diagnose_coded(
     if model.baseline is not None and not np.any(conc <= loc / 10):
         msgs.append(
             (
-                "no_low_conc",
+                DiagnosticCode.NO_LOW_CONC,
                 f"{loc_name} の 1/10（{loc / 10:.3g}）以下の低濃度点がありません。"
                 f"baseline が曲線と一緒に推定されるため、{amp_name} がずれる可能性があります。",
             )
@@ -758,7 +823,7 @@ def _diagnose_coded(
             also_exponent = f"{model.label(model.exponent)} も 1 を上回る側に偏るため、そのまま解釈できません。"
         msgs.append(
             (
-                "ligand_depletion",
+                DiagnosticCode.LIGAND_DEPLETION,
                 f"受容体（固定側）濃度 {receptor_conc:.3g} が {loc_name} の 1/10 を超えています。"
                 f"結合によって遊離リガンドが減るため、このモデルは {loc_name} を過大評価します。"
                 "tight_binding モデル（二次式）を使ってください。" + also_exponent,
@@ -784,7 +849,7 @@ def _diagnose_coded(
             )
             msgs.append(
                 (
-                    "hill_n_undetermined",
+                    DiagnosticCode.HILL_N_UNDETERMINED,
                     f"{coop_name} = {float(params[coop]):.3g} {reason}。"
                     "協同性の有無を判定できるデータになっていません。",
                 )
@@ -792,7 +857,7 @@ def _diagnose_coded(
         elif n_interval.contains(1.0):
             msgs.append(
                 (
-                    "hill_n_includes_one",
+                    DiagnosticCode.HILL_N_INCLUDES_ONE,
                     f"{coop_name} = {n_interval.format()} の信頼区間が 1 を含みます。"
                     "協同性があるとは主張できません。langmuir モデルで十分か AICc で比較してください。",
                 )
@@ -800,7 +865,7 @@ def _diagnose_coded(
         elif n_interval.upper is not None and n_interval.upper < 1.0:
             msgs.append(
                 (
-                    "hill_n_below_one",
+                    DiagnosticCode.HILL_N_BELOW_ONE,
                     f"{coop_name} = {n_interval.format()} が有意に 1 を下回っています。負の協同性、"
                     "結合サイトの不均一性、または試料の不均一性を示唆します。",
                 )
@@ -818,7 +883,7 @@ def _diagnose_coded(
             )
             msgs.append(
                 (
-                    "hill_n_above_one",
+                    DiagnosticCode.HILL_N_ABOVE_ONE,
                     f"{coop_name} = {n_interval.format()} が有意に 1 を上回っています。正の協同性と"
                     "解釈できますが、協同性がなくても同じ形は生じます。リガンド枯渇（受容体濃度が "
                     f"{loc_name} に対して希薄でない）、会合・自己集合、平衡に達していない読み出しは"
@@ -836,7 +901,7 @@ def _diagnose_coded(
         if undetermined:
             msgs.append(
                 (
-                    "limit_undetermined",
+                    DiagnosticCode.LIMIT_UNDETERMINED,
                     f"信頼区間の片側が決定できないパラメータがあります: {', '.join(undetermined)}。"
                     "点推定値を有効数字つきで報告せず、片側限界として報告してください。"
                     "パラメータの共有か、測定範囲の拡張が必要です。",

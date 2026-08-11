@@ -30,7 +30,7 @@ uv add affinityfit
 ```
 
 ```python
-from affinityfit import fit, load_csv
+from affinityfit import DiagnosticCode, fit, load_csv
 
 conc, signal = load_csv("titration.csv")
 res = fit(conc, signal, unit="nM")
@@ -41,7 +41,7 @@ print(res.params["kd"], res.intervals["kd"].format("nM"))
 for diagnostic in res.diagnostics:
     print(diagnostic.code, diagnostic.severity, diagnostic.message)
 
-if any(diagnostic.code == "not_saturated" for diagnostic in res.diagnostics):
+if any(diagnostic.code == DiagnosticCode.NOT_SATURATED for diagnostic in res.diagnostics):
     # Extend the concentration range before interpreting Kd or Bmax.
     pass
 
@@ -54,6 +54,12 @@ has a stable `code` for program logic, a `severity` of `"warning"` or `"note"`,
 and a concise English `message` for display. Do not branch on `message`: its prose
 may be refined without changing the code. `res.warnings` and `res.notes` are
 severity-filtered views containing the same `Diagnostic` objects.
+
+`DiagnosticCode` is an enum listing every code this library can emit, so
+`list(DiagnosticCode)` is how to discover them all without reading the source.
+Each member is a plain string (`DiagnosticCode.NOT_SATURATED == "not_saturated"`),
+so comparing `diagnostic.code` against either the enum member or the equivalent
+string literal works the same way.
 
 The input CSV has concentration in the first column and signal in the second.
 Header rows, comment rows, and blank rows are skipped. Repeated rows at the same
@@ -357,27 +363,39 @@ following are warned about automatically. A quantity whose name changes by model
 There are two kinds of diagnostics: whether **the fit itself is sound**, and
 whether **the measurements are placed well**.
 
-| Condition | Meaning |
-|---|---|
-| Amplitude collapsed to near 0 | The fit is effectively a flat line; the model cannot express the shape of the data |
-| R² < 0.5 | The model does not capture the trend in the data; the value of Kd is meaningless |
-| R² < 0.9 | Low for a saturation curve; either noise or the wrong model |
-| Systematic sign in the residuals | The shape of the model does not match the mechanism, even with a high coefficient of determination |
-| A parameter stuck at a bound | That value is an artefact of the constraint, not an estimate, and cannot be reported |
-| Highest concentration < 3 * Kd | Saturation not reached; Kd and Bmax cannot be mathematically separated, so the conclusion is limited to "Kd > highest concentration" |
-| Highest concentration < 10 * Kd | The estimate of Bmax is unstable, and the confidence interval on Kd widens as well |
-| Data points < 2 * estimated parameters | Not enough information; confidence intervals are indicative only (fixed parameters are not counted) |
-| 0-1 points near Kd (Kd/3 to 3Kd) | The inflection point of the curve is underdetermined; adding points here helps the most |
-| Lowest concentration > Kd | Every point sits on the saturated side; Kd is set by extrapolation and should not be reported to extra significant figures |
-| No points at or below Kd/10 | baseline is estimated together with the curve, which can shift Bmax |
-| Receptor concentration > Kd/10 | Ligand depletion causes Kd to be overestimated; switch to `tight_binding`. Not reported when that model is already in use. With `hill`, also states that n is inflated and cooperativity cannot be judged at all under these conditions |
-| Hill coefficient n's CI contains 1 | Cooperativity cannot be claimed |
-| Hill coefficient n significantly > 1 | Positive cooperativity is one reading, but depletion, self-association and a pre-equilibrium reading give the same shape. Says so when `receptor_conc` was not supplied to check the first of them |
-| Hill coefficient n significantly < 1 | Negative cooperativity, heterogeneous sites, or a heterogeneous sample | `ki_from_ic50` raises a `UserWarning` rather than a diagnostic, since it is called after the fit and has no result of its own to attach one to.
-| Residual size proportional to the fitted value | Heteroscedastic error; omitting `sigma` narrows the interval |
-| Zero degrees of freedom (points ≤ parameters) | The curve passes through every point by construction; no confidence interval can be computed |
-| Rank-deficient Jacobian | Parameters cannot be told apart, so the values are not uniquely determined; more concentrations are needed |
-| One side of a confidence interval is undetermined | The point estimate should not be reported; sharing or a wider measured range is needed |
+`Diagnostic.code` (a `DiagnosticCode` member) is the value to branch on; see
+[`DiagnosticCode`](#usage) for how to list every code from Python.
+
+| Condition | Meaning | Code |
+|---|---|---|
+| Amplitude collapsed to near 0 | The fit is effectively a flat line; the model cannot express the shape of the data | `AMPLITUDE_COLLAPSED` |
+| R² < 0.5 | The model does not capture the trend in the data; the value of Kd is meaningless | `NO_FIT` |
+| R² < 0.9 | Low for a saturation curve; either noise or the wrong model | `POOR_FIT` |
+| Systematic sign in the residuals | The shape of the model does not match the mechanism, even with a high coefficient of determination | `RESIDUAL_STRUCTURE` |
+| A parameter stuck at a bound | That value is an artefact of the constraint, not an estimate, and cannot be reported | `PARAM_AT_BOUND` |
+| Highest concentration < 3 * Kd | Saturation not reached; Kd and Bmax cannot be mathematically separated, so the conclusion is limited to "Kd > highest concentration" | `NOT_SATURATED` |
+| Highest concentration < 10 * Kd | The estimate of Bmax is unstable, and the confidence interval on Kd widens as well | `WEAKLY_SATURATED` |
+| Data points < 2 * estimated parameters | Not enough information; confidence intervals are indicative only (fixed parameters are not counted) | `FEW_POINTS` |
+| 0 points near Kd (Kd/3 to 3Kd) | The inflection point of the curve is underdetermined; adding points here helps the most | `NO_POINTS_NEAR_KD` |
+| 1 point near Kd (Kd/3 to 3Kd) | The inflection point of the curve rests on a single point | `ONE_POINT_NEAR_KD` |
+| Lowest concentration > Kd | Every point sits on the saturated side; Kd is set by extrapolation and should not be reported to extra significant figures | `KD_EXTRAPOLATED` |
+| No points at or below Kd/10 | baseline is estimated together with the curve, which can shift Bmax | `NO_LOW_CONC` |
+| Receptor concentration > Kd/10 | Ligand depletion causes Kd to be overestimated; switch to `tight_binding`. Not reported when that model is already in use. With `hill`, also states that n is inflated and cooperativity cannot be judged at all under these conditions | `LIGAND_DEPLETION` |
+| Hill coefficient n's CI is undetermined | The interval has no scatter to read a direction from, or a side is undetermined; cooperativity cannot be judged | `HILL_N_UNDETERMINED` |
+| Hill coefficient n's CI contains 1 | Cooperativity cannot be claimed | `HILL_N_INCLUDES_ONE` |
+| Hill coefficient n significantly > 1 | Positive cooperativity is one reading, but depletion, self-association and a pre-equilibrium reading give the same shape. Says so when `receptor_conc` was not supplied to check the first of them | `HILL_N_ABOVE_ONE` |
+| Hill coefficient n significantly < 1 | Negative cooperativity, heterogeneous sites, or a heterogeneous sample | `HILL_N_BELOW_ONE` |
+| Residual size proportional to the fitted value | Heteroscedastic error; omitting `sigma` narrows the interval | `HETEROSCEDASTIC` |
+| Zero degrees of freedom (points ≤ parameters) | The curve passes through every point by construction; no confidence interval can be computed | `NO_DEGREES_OF_FREEDOM` |
+| Rank-deficient Jacobian | Parameters cannot be told apart, so the values are not uniquely determined; more concentrations are needed | `RANK_DEFICIENT_JACOBIAN` |
+| One side of a confidence interval is undetermined | The point estimate should not be reported; sharing or a wider measured range is needed | `LIMIT_UNDETERMINED` |
+| Too many bootstrap resamples failed to converge | Below the minimum for a percentile interval; the interval is reported as undetermined | `BOOTSTRAP_INSUFFICIENT_SAMPLES` |
+| Some bootstrap resamples failed to converge | The interval may be narrower than it should be, since the resamples that converge are the easier ones to fit | `BOOTSTRAP_FAILURES` |
+| Amplitude shared in a global fit rescues an unsaturated dataset | Sharing made an otherwise unidentifiable estimate possible; not a problem | `SHARED_AMPLITUDE_IDENTIFIES_LOCATION` |
+| Amplitude free in a global fit with an unsaturated dataset | Consider sharing the amplitude if the maximum signal is common across datasets | `UNSHARED_AMPLITUDE` |
+
+`ki_from_ic50` raises a `UserWarning` rather than a diagnostic, since it is called
+after the fit and has no `FitResult` of its own to attach one to.
 
 In a global fit, remarks whose premise is removed by sharing or fixing are
 suppressed. For example, if `bmax` is shared, "Kd and Bmax cannot be separated"

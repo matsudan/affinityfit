@@ -28,7 +28,15 @@ from numpy.typing import NDArray
 from scipy import stats
 from scipy.optimize import least_squares
 
-from affinityfit.core import Diagnostic, FitResult, Statistic, _diagnose_coded, _diagnostic, _reject_non_finite
+from affinityfit.core import (
+    Diagnostic,
+    DiagnosticCode,
+    FitResult,
+    Statistic,
+    _diagnose_coded,
+    _diagnostic,
+    _reject_non_finite,
+)
 from affinityfit.models import Model, langmuir
 from affinityfit.uncertainty import (
     MIN_BOOTSTRAP_SAMPLES,
@@ -815,30 +823,30 @@ def fit_global(
     # Degree-of-freedom and rank problems do not depend on the interval method, so they belong to the fit as a whole.
     dof = problem.n_points - problem.n_slots
     if dof < 1:
-        fit_diagnostics.append(_diagnostic("no_degrees_of_freedom", "warning"))
+        fit_diagnostics.append(_diagnostic(DiagnosticCode.NO_DEGREES_OF_FREEDOM, "warning"))
     elif jac is not None:
         rank = _jacobian_rank(jac)
         if rank < problem.n_slots:
-            fit_diagnostics.append(_diagnostic("rank_deficient_jacobian", "warning"))
+            fit_diagnostics.append(_diagnostic(DiagnosticCode.RANK_DEFICIENT_JACOBIAN, "warning"))
 
     # The resamples that converge are the ones that were easy to fit, so the number of failures is reported.
     if bootstrap_failures:
         successes = n_boot - bootstrap_failures
         if successes < MIN_BOOTSTRAP_SAMPLES:
-            fit_diagnostics.append(_diagnostic("bootstrap_insufficient_samples", "warning"))
+            fit_diagnostics.append(_diagnostic(DiagnosticCode.BOOTSTRAP_INSUFFICIENT_SAMPLES, "warning"))
         else:
-            fit_diagnostics.append(_diagnostic("bootstrap_failures", "warning"))
+            fit_diagnostics.append(_diagnostic(DiagnosticCode.BOOTSTRAP_FAILURES, "warning"))
 
     # Suppress the remarks whose premise changes under sharing or fixing, so the advice does not contradict itself.
-    suppressed: set[str] = set()
+    suppressed: set[DiagnosticCode] = set()
     if model.amplitude in shared_t:
-        suppressed |= {"not_saturated", "weakly_saturated"}
+        suppressed |= {DiagnosticCode.NOT_SATURATED, DiagnosticCode.WEAKLY_SATURATED}
     if model.baseline is not None and model.baseline in fixed_d:
-        suppressed.add("no_low_conc")
+        suppressed.add(DiagnosticCode.NO_LOW_CONC)
 
     for dataset in problem.datasets:
         loc = params[dataset.name][model.location]
-        codes: set[str] = set()
+        codes: set[DiagnosticCode] = set()
         dataset_stats: list[Statistic] = []
         for code, _ in _diagnose_coded(
             dataset.conc,
@@ -860,11 +868,13 @@ def fit_global(
         unsaturated = float(dataset.conc.max()) < 3 * loc
         # When the fit itself is broken, sharing cannot be credited with making the estimate possible; pairing that
         # with a warning that the location value is meaningless would be contradictory advice.
-        broken = bool(codes & {"no_fit", "amplitude_collapsed"})
+        broken = bool(codes & {DiagnosticCode.NO_FIT, DiagnosticCode.AMPLITUDE_COLLAPSED})
         if unsaturated and model.amplitude in shared_t and not broken:
-            per_diagnostics[dataset.name].append(_diagnostic("shared_amplitude_identifies_location", "note"))
+            per_diagnostics[dataset.name].append(
+                _diagnostic(DiagnosticCode.SHARED_AMPLITUDE_IDENTIFIES_LOCATION, "note")
+            )
         elif unsaturated and model.amplitude not in shared_t and len(problem.datasets) > 1:
-            per_diagnostics[dataset.name].append(_diagnostic("unshared_amplitude", "warning"))
+            per_diagnostics[dataset.name].append(_diagnostic(DiagnosticCode.UNSHARED_AMPLITUDE, "warning"))
 
     return GlobalFitResult(
         model=model,

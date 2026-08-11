@@ -13,7 +13,7 @@ from typing import Literal, cast
 import numpy as np
 import pytest
 
-from affinityfit import Dataset, Diagnostic, diagnose, fit, fit_global, hill, langmuir
+from affinityfit import Dataset, Diagnostic, DiagnosticCode, diagnose, fit, fit_global, hill, langmuir
 from affinityfit.uncertainty import Interval, profile_bounds
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 12)])
@@ -40,10 +40,21 @@ def test_diagnose_works_when_both_are_given():
     assert all(diagnostic.message.isascii() for diagnostic in diagnostics)
 
 
+def test_diagnostic_code_is_importable_and_covers_every_message():
+    """`DiagnosticCode` is how a caller discovers every code this library can emit."""
+    from affinityfit.core import _DIAGNOSTIC_MESSAGES
+
+    assert set(DiagnosticCode) == set(_DIAGNOSTIC_MESSAGES)
+    assert len(DiagnosticCode) > 20
+    # Every member is a plain string, so existing string-based usage keeps working.
+    assert DiagnosticCode.NOT_SATURATED == "not_saturated"
+    assert isinstance(DiagnosticCode.NOT_SATURATED, str)
+
+
 def test_diagnostic_rejects_an_unsupported_severity():
     severity = cast(Literal["warning", "note"], "error")
     with pytest.raises(ValueError, match="Unsupported diagnostic severity"):
-        Diagnostic("invalid_severity", severity, "Invalid severity.")
+        Diagnostic(DiagnosticCode.NOT_SATURATED, severity, "Invalid severity.")
 
 
 def test_diagnose_has_no_none_default_for_params():
