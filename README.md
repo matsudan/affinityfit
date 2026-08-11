@@ -1,22 +1,27 @@
 # affinityfit
 
-滴定データ（濃度とシグナルの 2 列）から **Kd** などを求め、その推定値を信用してよいかを
-診断する Python ライブラリ。
+[![PyPI](https://img.shields.io/pypi/v/affinityfit)](https://pypi.org/project/affinityfit/)
+[![Python versions](https://img.shields.io/pypi/pyversions/affinityfit)](https://pypi.org/project/affinityfit/)
+[![ci](https://github.com/matsudan/affinityfit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/matsudan/affinityfit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/pypi/l/affinityfit)](https://github.com/matsudan/affinityfit/blob/main/LICENSE)
 
-観測量が結合率と線形の関係にあれば、測定手段を問わず同じ数式（飽和曲線）が使えます。
-NMR のピーク強度、SPR の定常状態応答、酵素反応の初速度がその例です。
+A Python library that fits **Kd** and related parameters from concentration and
+signal data, and diagnoses whether the resulting estimate can be trusted.
+
+Any observable that is linear in the fraction bound follows the same model (a
+saturation curve), regardless of the measurement technique. NMR peak intensity,
+SPR steady-state response, and initial enzyme velocity are all examples.
 
 ```
 signal = baseline + Bmax * [L] / (Kd + [L])
 ```
 
-複数のデータセットを同時にフィッティングし、パラメータをデータセット間で共有したり
-定数に固定したりできます。測定範囲が Kd を挟んでいないために単独では決定不能な曲線
-でも、共有によって推定が成立します。
+Several datasets can be fitted simultaneously, sharing parameters across them or
+holding some constant. A curve whose measured range does not bracket Kd is
+otherwise undetermined on its own; sharing a parameter with a better-sampled
+dataset can make the estimate identifiable.
 
 ## Usage
-
-Python >= 3.12
 
 ```bash
 uv add affinityfit
@@ -34,11 +39,13 @@ for warning in res.warnings:
     print(warning)
 ```
 
-入力 CSV は 1 列目が濃度、2 列目がシグナル。ヘッダ行・コメント行・空行は読み飛ばします。
-同じ濃度の行が複数あればレプリケートとしてそのまま使われます。
+The input CSV has concentration in the first column and signal in the second.
+Header rows, comment rows, and blank rows are skipped. Repeated rows at the same
+concentration are used as replicates as-is.
 
-欠測（空欄）、`nan`、`inf` は行番号つきのエラーになります。空欄の行を黙って捨てると
-点数が変わり、自由度と診断が静かに変わってしまうためです。
+Missing values (blank cells), `nan`, and `inf` raise an error with the row number.
+Silently dropping a blank row would change the number of points, and with it the
+degrees of freedom and the diagnostics.
 
 ```csv
 concentration_nM,signal
@@ -52,7 +59,7 @@ concentration_nM,signal
 1000,1.0035
 ```
 
-`report()` の出力:
+Output of `report()`:
 
 ```
 model    : langmuir  (1:1 binding: signal = baseline + Bmax * L / (Kd + L))
@@ -66,207 +73,203 @@ AICc     = -71.12   (AIC = -77.12)
 診断チェック: 問題は検出されませんでした。
 ```
 
-固定側（受容体・レクチンなど）の濃度がわかっている場合は渡してください。
-リガンド枯渇のチェックが有効になります。
+If the concentration of the fixed partner (a receptor, a lectin, and so on) is
+known, pass it in to enable the ligand-depletion check.
 
 ```python
 res = fit(conc, signal, receptor_conc=1.0, unit="nM")
 ```
 
-モデルを変えるには `model=` を渡します。
+Pass `model=` to switch models.
 
 ```python
 from affinityfit import hill
 
-res = fit(conc, signal, model=hill)  # 協同性を検定する
+res = fit(conc, signal, model=hill)  # test for cooperativity
 print(res.intervals["n"].contains(1.0))
 ```
 
-複数データセットを同時にフィッティングし、パラメータを共有・固定する場合:
+Fitting several datasets simultaneously, sharing or fixing parameters:
 
 ```python
 from affinityfit import Dataset, fit_global
 
 res = fit_global(
     [Dataset("oxidized", conc, sig_ox), Dataset("reduced", conc, sig_red)],
-    shared=["bmax"],  # 全データセットで 1 つの値を推定
-    fixed={"baseline": 0.0},  # 定数に固定して推定しない
+    shared=["bmax"],  # estimate a single value across all datasets
+    fixed={"baseline": 0.0},  # hold at a constant, not estimated
     unit="mM",
 )
 print(res.report())
 
-# 1 データセット分を取り出す。そのデータセットの警告・注記も一緒に付いてくる。
+# Pull out one dataset. Its warnings and notes come along with it.
 sub = res.result_for("oxidized")
 print(sub.report())
 x, y = sub.curve()
 ```
 
-`warnings` は問題、`notes` は「共有したおかげで推定できている」のような補足です。
-`GlobalFitResult.warnings` / `.notes` は `[データセット名]` の接頭辞つきで全件を返し、
-`result_for()` はそのデータセット分（およびフィッティング全体に関わるもの）を接頭辞
-なしで返します。
+`warnings` are problems, `notes` are remarks such as "sharing is what made this
+estimate possible". `GlobalFitResult.warnings` / `.notes` return everything with a
+`[dataset name]` prefix, while `result_for()` returns the ones for that dataset
+(plus any that concern the fit as a whole) without the prefix.
 
 ## Weighting
 
-既定では全点を等価値に扱います。これは「誤差の大きさがどこでも同じ」という仮定で、
-SPR の RU のような系では妥当ですが、蛍光・発光・吸光では誤差が信号に比例するため
-成り立ちません。飽和曲線は信号が baseline から baseline+Bmax まで動くので、飽和側の
-点の絶対誤差が低濃度側の数十倍になります。
+By default every point counts equally, which assumes the measurement error is the
+same size everywhere. That holds for a system like SPR response units, but not for
+fluorescence, luminescence, or absorbance, where the error scales with the signal.
+Since a saturation curve moves the signal from baseline to baseline+Bmax, the
+absolute error near saturation can be tens of times larger than at low
+concentration.
 
 ```python
-res = fit(conc, signal, sigma=0.01 + 0.10 * signal)  # 点ごとの標準偏差
+res = fit(conc, signal, sigma=0.01 + 0.10 * signal)  # per-point standard deviation
 ```
 
-`sigma` は相対値として扱われ、全体のスケールは残差から推定されます。定数倍しても
-結果は変わりません。グローバルフィットでは `Dataset(..., sigma=...)` でデータセット
-ごとに渡せ、データセット間の相対的な重み（片方が 10 倍ノイジー等）も反映されます。
+`sigma` is treated as relative; the overall scale is still estimated from the
+residuals, so the result is unchanged under a constant rescaling. In a global fit,
+`Dataset(..., sigma=...)` can be given per dataset, which also carries over the
+relative weight between datasets (one being ten times noisier than another, say).
 
-sigma は**全データセットに与えるか、どこにも与えないか**のどちらかです。一部にだけ
-与えると、sigma のないデータセットの重みが暗黙に 1 になり、両者の重み比が sigma の
-絶対スケール（分数か % か ppm か）で決まってしまうためです。混在はエラーになります。
+sigma must be given for **either every dataset or none of them**. Giving it to only
+some would leave the others with an implicit weight of 1, so the relative weight
+between datasets would be decided by the absolute scale of sigma (whether it is
+written as a fraction, a percentage, or ppm). Mixing the two raises an error.
 
-重みを渡さずに不均一分散のデータをフィッティングすると、精度が落ちるだけでなく
-**信頼区間が狭く出ます**。Kd=10 に対し 30% の比例誤差、Kd が測定範囲上端にある設計
-での実測です。
+Fitting heteroscedastic data without weights costs more than precision: **it also
+narrows the confidence interval** (measured for Kd=10 with 30% proportional error,
+95% CI coverage was 79% unweighted versus 94% with sigma supplied).
 
-| | Kd の四分位範囲 | 95%CI の被覆率 |
-|---|---|---|
-| 重みなし | 19.7 | 79% |
-| sigma 指定 | 11.3 | 94% |
-
-残差の大きさがフィッティング値とともに増えている場合は診断が警告します（誤報率 2%、
-比例誤差の検出率 56〜71%）。
+The diagnostics warn when the size of the residuals grows with the fitted value.
 
 ## Confidence Intervals
 
-`ci=` で 3 つの方法を選べます。
+`ci=` selects one of three methods.
 
-| 方法 | 内容 |
+| Method | Description |
 |---|---|
-| `profile`（既定） | Kd を固定して他を再フィットし、残差平方和が有意に増える点を境界とする（F 検定）。区間は非対称になりうる。片側が決まらない場合は「Kd > 1.6」という形で返す |
-| `asymptotic` | 共分散行列の曲率から区間を出す。最も高速。Kd のような濃度定数は対数スケールで区間を作るので下限が負になることはないが、曲面が閉じていなくても有限の両側区間を主張してしまう（識別不能なデータで 2 桁以上に広がった区間が出る） |
-| `bootstrap` | データを再抽出して推定値の分布を直接得る。反復測定があれば反復を、なければ残差を再抽出する |
+| `profile` (default) | Pins Kd and refits everything else, taking the boundary where the residual sum of squares rises significantly (an F-test). The interval can be asymmetric; when one side cannot be pinned down it comes back as, for example, `Kd > 1.6` |
+| `asymptotic` | Reads the interval off the curvature of the covariance matrix. The fastest option, but can claim a finite two-sided interval even for unidentifiable data |
+| `bootstrap` | Resamples the data and refits to get the distribution of the estimate directly. Resamples replicates when given, residuals otherwise |
 
-反復実験から誤差を出す慣行はこの分野で広く使われています。反復測定を渡せばその
-流儀に揃えられます。
+Reporting error from repeated experiments is standard practice in this field.
+Passing replicate measurements follows that convention.
 
 ```python
 res = fit(conc, signal, ci="bootstrap", replicates=reps, n_boot=2000)
 ```
 
-`Dataset` では反復測定だけを渡せます（`signal` は平均が使われます）。
+`Dataset` also accepts replicates on their own (`signal` is then their mean).
 
 ```python
 Dataset("oxidized", conc, replicates=reps)
 ```
 
-`n_boot` は百分位区間に必要な下限（100）以上でなければエラーになります。下回った値を
-渡すと区間が作れないためです。
+`n_boot` must be at or above the minimum needed for a percentile interval (100),
+or it raises an error; below that, no interval can be formed.
 
-報告される桁数は不確かさに合わせて丸められます。相対誤差 17% の測定から
-`Kd = 4.70e-8` と 3 桁で書くのは過剰なので、`(4.7 +/- 0.8)e-08` になります。
+The reported precision follows the uncertainty. A measurement with a 17% relative
+error does not warrant three significant figures, so `Kd = 4.70e-8` is reported as
+`(4.7 +/- 0.8)e-08` instead.
 
 ## Model
 
-| モデル | パラメータ | 用途 |
+| Model | Parameters | Use |
 |---|---|---|
-| `langmuir`（既定） | kd, bmax, baseline | 1:1 結合。`signal = baseline + Bmax·L/(Kd+L)` |
-| `hill` | kd, bmax, baseline, n | 協同性。n の信頼区間が 1 を含むかで判定 |
-| `michaelis` | km, vmax, baseline | 酵素反応速度。式は langmuir と同一だが Km は親和性ではない |
+| `langmuir` (default) | kd, bmax, baseline | 1:1 binding. `signal = baseline + Bmax·L/(Kd+L)` |
+| `hill` | kd, bmax, baseline, n | Cooperativity, judged by whether the confidence interval of n contains 1 |
+| `michaelis` | km, vmax, baseline | Enzyme kinetics. Same equation as langmuir, but Km is not an affinity |
 
-`langmuir` と `hill` の `bmax` は符号を制限していません。結合によって**減少する**観測量
-（蛍光クエンチ、強度の減少）でも Kd の意味は変わらず、負の応答係数として同じ式で表せます。
-`michaelis` の `vmax` は反応速度なので非負に留めているため、減少するデータには
-`langmuir` か `hill` を使ってください。噛み合わないモデルを指定した場合は、それらしい
-数値を返さずに警告します。
+`bmax` in `langmuir` and `hill` is not restricted in sign. An observable that
+**decreases** on binding (fluorescence quenching, a drop in intensity) still has
+the same meaning for Kd, expressed as a negative response coefficient in the same
+equation. `vmax` in `michaelis` is a rate and stays non-negative, so use `langmuir`
+or `hill` for decreasing data. Fitting the wrong kind of model to the data warns
+rather than returning a plausible-looking number.
 
-`Km = (k_off + k_cat)/k_on` であり、`k_cat` が無視できるときだけ Kd に一致します。
+`Km = (k_off + k_cat)/k_on`, and only equals Kd when `k_cat` is negligible.
 
-Kd や Km は対数スケールで最適化されます。線形に扱うとフィッティング結果が濃度の単位に
-依存し、M 単位のまま pM 親和性（Kd = 1e-12 M）を扱うと相対誤差が 6800% に達します。
-現在は fM から 100 M まで 18 桁にわたって相対誤差 1e-6 以内で回収し、同じ実験を
-M / nM / pM のどの単位で書いても同じ答えになります。
-モデルの追加は `models.py` に `Model` を 1 つ定義するだけで、フィッティングと診断の
-コードには手を入れません。
+Kd and Km are optimised on a logarithmic scale. Handled linearly, the fitted
+result would depend on the unit of concentration, reaching a relative error of
+6800% for a picomolar affinity (Kd = 1e-12 M) expressed in molar units. As it
+stands, Kd is recovered to within 1e-6 relative error across 18 orders of
+magnitude, from fM to 100 M, giving the same answer whether the same experiment is
+written in M, nM, or pM.
 
 ## Model Selection
 
-モデルやパラメータ共有の比較には `aicc`（小標本補正つき赤池情報量規準）を使ってください。
-`aic` も参照用に持っていますが、補正なしの AIC は漸近的にしか妥当でなく、滴定実験の
-規模（点数 6〜15、パラメータ 3〜6 で n/k が 2〜5）ではパラメータの多い側に偏ります。
+Use `aicc` (the corrected Akaike information criterion) to compare models or
+parameter-sharing schemes. `aic` is kept for reference, but the uncorrected AIC is
+only asymptotically valid and favours the model with more parameters at the scale
+of a typical titration (6-15 points, 3-6 parameters, n/k of 2-5).
 
-実測: 振幅が真に共通なデータ（12 点、共有で 3 パラメータ / 非共有で 4）40 通りで、
-補正なし AIC が共有を選んだのは 32 回、AICc は 38 回でした。10 点・5 対 6 パラメータの
-構成では 12 通り中 7 通りで結論が食い違い、いずれも AIC が過剰パラメータ側を選びました。
+This has been confirmed empirically as well: with fewer points, the uncorrected
+AIC tends to favour the model with more parameters.
 
 ```python
 shared.aicc < free.aicc
 fit_global(ds, model=hill).aicc < fit_global(ds, model=langmuir).aicc
 ```
 
-標本が小さすぎて補正が定義できない場合（n − k − 1 ≤ 0）、`aicc` は無限大になります。
-`report()` は AICc を先に、参照用の AIC を括弧内に表示します。
+When the sample is too small for the correction to be defined (n − k − 1 ≤ 0),
+`aicc` is infinite. `report()` shows AICc first, with AIC in parentheses for
+reference.
 
 ## Diagnostics
 
-R² が 0.99 を超えていても Kd が決まっていないことは珍しくありません。以下を自動で警告します。
-Kd / Km のようにモデルごとに呼び名が変わる量は、そのモデルの表記で表示されます。
+It is not unusual for Kd to be undetermined even when R² is above 0.99. The
+following are warned about automatically. A quantity whose name changes by model
+(Kd, Km) is shown under that model's own label.
 
-診断は2種類あります。**フィッティング自体が健全か**と、**測定点の配置が適切か**です。
+There are two kinds of diagnostics: whether **the fit itself is sound**, and
+whether **the measurements are placed well**.
 
-| 条件 | 意味 |
+| Condition | Meaning |
 |---|---|
-| 振幅がほぼ 0 に潰れた | フィッティングは実質的に水平線。モデルがデータの形を表現できていない |
-| R² < 0.5 | モデルがデータの傾向を捉えていない。Kd の値に意味はない |
-| R² < 0.9 | 飽和曲線としては低め。ノイズかモデル選択の問題 |
-| 残差の符号が系統的 | 決定係数が高くてもモデルの形が機構に合っていない |
-| パラメータが境界に張り付いた | その値は推定結果ではなく制約の産物。報告できない |
-| 最高濃度 < 3 × Kd | 飽和未達。Kd と Bmax が数学的に分離できず、「Kd > 最高濃度」としか言えない |
-| 最高濃度 < 10 × Kd | Bmax の推定が不安定で、Kd の信頼区間も広がる |
-| データ点 < 2 × 推定パラメータ数 | 情報が不足。信頼区間は参考値（固定したパラメータは数えない） |
-| Kd 近傍（Kd/3〜3Kd）に点が 0〜1 個 | 曲線の変曲点が決まらない。ここに点を足すのが最も効く |
-| 最低濃度 > Kd | 全点が飽和側。Kd は外挿で決まっており、有効数字を増やして報告できない |
-| Kd/10 以下の点がない | baseline が曲線と一緒に推定され、Bmax がずれうる |
-| 受容体濃度 > Kd/10 | 結合でリガンドが減るため Kd を過大評価。tight-binding（二次式）モデルが必要 |
-| Hill 係数 n の CI が 1 を含む | 協同性を主張できない |
-| 残差の大きさがフィッティング値に比例 | 誤差が不均一。`sigma` を渡さないと区間が狭く出る |
+| Amplitude collapsed to near 0 | The fit is effectively a flat line; the model cannot express the shape of the data |
+| R² < 0.5 | The model does not capture the trend in the data; the value of Kd is meaningless |
+| R² < 0.9 | Low for a saturation curve; either noise or the wrong model |
+| Systematic sign in the residuals | The shape of the model does not match the mechanism, even with a high coefficient of determination |
+| A parameter stuck at a bound | That value is an artefact of the constraint, not an estimate, and cannot be reported |
+| Highest concentration < 3 × Kd | Saturation not reached; Kd and Bmax cannot be mathematically separated, so the conclusion is limited to "Kd > highest concentration" |
+| Highest concentration < 10 × Kd | The estimate of Bmax is unstable, and the confidence interval on Kd widens as well |
+| Data points < 2 × estimated parameters | Not enough information; confidence intervals are indicative only (fixed parameters are not counted) |
+| 0-1 points near Kd (Kd/3 to 3Kd) | The inflection point of the curve is underdetermined; adding points here helps the most |
+| Lowest concentration > Kd | Every point sits on the saturated side; Kd is set by extrapolation and should not be reported to extra significant figures |
+| No points at or below Kd/10 | baseline is estimated together with the curve, which can shift Bmax |
+| Receptor concentration > Kd/10 | Ligand depletion causes Kd to be overestimated; a tight-binding (quadratic) model is needed |
+| Hill coefficient n's CI contains 1 | Cooperativity cannot be claimed |
+| Residual size proportional to the fitted value | Heteroscedastic error; omitting `sigma` narrows the interval |
+| Zero degrees of freedom (points ≤ parameters) | The curve passes through every point by construction; no confidence interval can be computed |
+| Rank-deficient Jacobian | Parameters cannot be told apart, so the values are not uniquely determined; more concentrations are needed |
+| One side of a confidence interval is undetermined | The point estimate should not be reported; sharing or a wider measured range is needed |
 
-フィッティング自体が壊れている場合（R² < 0.5、振幅が潰れた）、「共有したおかげで
-推定できている」という NOTE は出しません。矛盾した助言になるためです。
-| 自由度が 0（点数 ≤ パラメータ数） | 曲線は定義上すべての点を通る。信頼区間は算出できない |
-| ヤコビ行列がランク落ち | パラメータが区別できず値が一意に決まらない。濃度の種類を増やす |
-| 信頼区間の片側が決定できない | 点推定値を報告してはいけない。共有か測定範囲の拡張が必要 |
+In a global fit, remarks whose premise is removed by sharing or fixing are
+suppressed. For example, if `bmax` is shared, "Kd and Bmax cannot be separated"
+no longer applies, and a note saying "sharing is what made this estimate
+possible" appears instead. That note is withheld, though, when the fit itself is
+broken (R² < 0.5, or a collapsed amplitude), since it would otherwise contradict
+the other advice.
 
-グローバルフィットでは、共有・固定によって前提が消えた指摘は抑制されます。たとえば
-`bmax` を共有していれば「Kd と Bmax を分離できない」は当てはまらないので、代わりに
-「共有しているため推定できている」という NOTE が出ます。
+`examples/titration_unsaturated.csv` is an example where R² = 0.9936 looks like a
+good fit, but the highest concentration is only a third of Kd, so the upper limit
+is undetermined and the result can only be reported as `Kd > 76 nM`.
 
-`examples/titration_unsaturated.csv` は R² = 0.9936 と当てはまりが良く見えても、最高濃度が
-Kd の 1/3 しかないため上限が決まらず `Kd > 76 nM` としか言えない例です。
+When a confidence interval cannot be computed (zero degrees of freedom, a
+rank-deficient Jacobian, an inner refit that fails to converge, or too few
+bootstrap resamples succeeding), no number is invented; the interval is reported
+as undetermined, with the reason given. The point estimate itself is still
+returned.
 
-信頼区間が算出できない場合は数値を作りません。自由度が 0 のとき、ヤコビ行列が
-ランク落ちしているとき、プロファイル探索の内側の再フィットが収束しなかったとき、
-ブートストラップの成功回数が足りないときは、区間を「決定不能」として返し、理由を
-警告で説明します。点推定値そのものは返します。
+Residuals are tested with both a runs test (Wald-Wolfowitz) and lag-1
+autocorrelation, and a warning fires if either is significant. The false-positive
+rate is kept under 2%.
 
-ブートストラップは収束しなかった再抽出の回数を数えて報告します。収束する再抽出は
-フィッティングしやすいものに偏るため、黙って捨てると区間が系統的に狭くなります。
+### Statistics
 
-残差が厳密に 0 のフィッティング（合成データなど）では区間幅も 0 になりますが、裸の
-数値ではなく `10.000 +/- 0 (no residual scatter)` と理由つきで表示します。
-
-残差の検定にはラン検定（Wald–Wolfowitz）と隣接残差の自己相関の両方を使い、どちらかが
-有意なら警告します。15 点の滴定を 300 通りのノイズで試した実測で、誤ったモデル
-（協同性データを 1:1 でフィッティングする、R² は 0.94〜0.98）の検出率は 100%、
-正しいモデルでの誤検出率は 0.3〜1.7% でした。
-
-### 統計量
-
-警告の判定は固定の有意水準（例: 残差検定は片側 2.5%、不均一分散は片側 1%）で行われて
-います。これは 1 件のフィッティングには適切ですが、複数のデータセットや複数の論文図に
-わたる検定を積み重ねる場合には、その有意水準は検定の数だけ増えた偽陽性率を勝手に
-受け入れていることになります。何本の検定になるか、それをどう補正すべきかはこちら側では
-決められないので、判定の元になった統計量と p 値をそのまま返します。
+The warnings are judged at a fixed significance level. Stacking tests across
+several datasets raises the false-positive rate accordingly, so the underlying
+statistic and p-value are returned as-is.
 
 ```python
 res = fit(conc, signal)
@@ -274,36 +277,18 @@ for s in res.statistics:
     print(s.name, s.statistic, s.p_value)
 ```
 
-複数データセットの場合は `GlobalFitResult.statistics_per["データセット名"]` で
-データセットごとに取得できます。集めた p 値に対して、`scipy.stats.false_discovery_control`
-や `statsmodels.stats.multitest.multipletests` で Bonferroni や Benjamini–Hochberg
-補正をかけられます。
-
-```python
-from scipy.stats import false_discovery_control
-
-p_values = [
-    s.p_value
-    for name, stats in res.statistics_per.items()
-    for s in stats
-    if s.name == "heteroscedasticity" and s.p_value is not None
-]
-q_values = false_discovery_control(p_values, method="bh")
-```
-
-`residual_autocorrelation` は固定閾値（0.3）による判定で、p 値を持ちません
-（`p_value` は `None`）。
+For several datasets, these are available per dataset through
+`GlobalFitResult.statistics_per["dataset name"]`. `residual_autocorrelation` is
+judged against a fixed threshold rather than a p-value, so its `p_value` is
+`None`.
 
 ## Plotting
 
-図を返す API はありません。論文用の図はフォント・色・パネル構成を自分で制御する必要が
-あるので、`affinityfit` は描画に必要な数値だけを返します。
-
-| メソッド | 返すもの |
+| Method | Returns |
 |---|---|
-| `res.curve(conc_min, conc_max, n)` | 対数間隔のフィッティング曲線 `(x, y)` |
-| `res.predict(conc)` | 任意の濃度におけるフィッティング値 |
-| `res.residuals(conc, signal)` | 残差（観測値 − フィッティング値） |
+| `res.curve(conc_min, conc_max, n)` | The fitted curve `(x, y)`, log-spaced |
+| `res.predict(conc)` | The fitted value at an arbitrary concentration |
+| `res.residuals(conc, signal)` | Residuals (observed minus fitted) |
 
 ```python
 import matplotlib.pyplot as plt
@@ -314,59 +299,18 @@ ax.plot(conc, signal, "o")
 ax.set_xscale("log")
 ```
 
-濃度軸は対数にしてください。線形軸だと低濃度側が潰れ、Kd 近傍の曲率と「測定点が
-飽和領域に偏っている」といった設計上の問題が見えなくなります。
+Keep the concentration axis logarithmic. On a linear axis the low-concentration
+region collapses, hiding both the curvature near Kd and design issues such as the
+measurements being skewed toward saturation.
 
-`examples/plot_fit.py` に、測定点・フィッティング曲線・残差パネルを 1 枚に描くサンプル
-があります。配布物には含まれません。
+`examples/plot_fit.py` is a sample that draws the measured points, the fitted
+curve, and a residual panel in a single figure. It is not part of the
+distribution.
 
 ```bash
 uv run python examples/plot_fit.py examples/titration_good.csv --unit nM
 ```
 
-`examples/titration_good.csv` にこのサンプルを実行した結果:
+Running this sample on `examples/titration_good.csv`:
 
 ![langmuir fit of examples/titration_good.csv](examples/fit_good.png)
-
-## Development
-
-```bash
-uv run pytest -q
-uv run ruff check .
-uv run ruff format --check .
-uv run ty check
-```
-
-テストは既知のパラメータ（Kd は 1e-16 〜 1e2 の 18 桁、Hill 係数は 0.4 〜 3）を回収
-できるか、各警告が意図した条件でのみ発火するか、共有パラメータが識別不能なデータセット
-を救うかを検証しています。信頼区間については、良条件のデータで 3 手法が一致すること、
-プロファイル区間の端が F 検定の閾値に厳密に一致すること、識別不能なデータで片側限界に
-なることを確認しています。`examples/` のサンプルもテストから実際に呼んでいるので、
-API を変えれば落ちます。
-
-## Roadmap
-
-未実装のもの。上の各節に書かれている機能はすべて動きます。
-
-**モデル**
-
-- 時間経過モデル `A(1 - exp(-k·t))`。プラトーに達していないと振幅と速度定数が
-  分離できないため、その判定つきで
-- 競合阻害モデル（阻害剤存在下の見かけの Kd から真の Ki を出す）
-- tight-binding（二次式）モデル。受容体濃度が Kd と同程度の場合に必要
-- 山型のプロファイル（金属濃度やイオン強度の最適値、pH 最適）。単調でないため
-  飽和曲線とは別の族になる
-
-**誤差モデル**
-
-- `sigma` を自前で用意できない場合の分散モデル（`proportional` / `poisson`）。
-  当てはめ値から重みを作るため反復再重み付けが必要で、当てはめ値が 0 の点で
-  重みが発散する。σ の下限を含めた定式化が前提
-- 反復測定から `sigma` を推定する。反復数が少ないと標準偏差自体がばらつくので、
-  そのばらつきを織り込む必要がある
-
-**入出力**
-
-- 複数データセットの結果表を CSV / JSON で出力するヘルパ
-- 装置固有のエクスポート形式（SPR のセンサーグラムなど）のインポータ
-- LOD / LOQ の算出（IUPAC / CLSI 準拠）
