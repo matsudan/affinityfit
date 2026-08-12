@@ -48,6 +48,7 @@ dev = [
     # on numpy and scipy alone.
     "matplotlib>=3.11.1",
     "ty==0.0.69",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.ty.environment]

@@ -98,7 +98,7 @@ jobs:
         run: uv sync --locked
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest -n auto
 
   # Confirms in an environment where matplotlib is genuinely absent that the library
   # works on numpy and scipy alone. The unit test
