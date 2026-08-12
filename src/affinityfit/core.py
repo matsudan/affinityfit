@@ -234,6 +234,10 @@ class FitResult:
         statistics: Raw statistic and p-value behind the residual-shape and
             heteroscedasticity checks, for applying your own multiple-comparison
             correction across several fits. See `Statistic`.
+        receptor_conc: Total concentration of the fixed partner, as supplied to the
+            fit. Retained because the corrections applied after a fit need it:
+            `ki_from_ic50` uses it to replace the Cheng-Prusoff approximation with the
+            exact form. None when it was not given.
     """
 
     model: Model
@@ -248,6 +252,7 @@ class FitResult:
     unit: str = ""
     diagnostics: tuple[Diagnostic, ...] = field(default_factory=tuple)
     statistics: tuple[Statistic, ...] = field(default_factory=tuple)
+    receptor_conc: float | None = None
 
     @property
     def ci95(self) -> dict[str, float]:

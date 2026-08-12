@@ -550,6 +550,9 @@ class GlobalFitResult:
         statistics_per: Raw statistic and p-value per dataset behind the
             residual-shape and heteroscedasticity checks, for applying your own
             multiple-comparison correction across datasets. See `Statistic`.
+        receptor_conc_per: Total concentration of the fixed partner per dataset, as
+            supplied on each `Dataset`. Passed on by `result_for` so that corrections
+            applied after the fit, such as `ki_from_ic50`, can use it.
     """
 
     model: Model
@@ -569,6 +572,7 @@ class GlobalFitResult:
     fit_diagnostics: tuple[Diagnostic, ...] = field(default_factory=tuple)
     diagnostics_per: dict[str, tuple[Diagnostic, ...]] = field(default_factory=dict)
     statistics_per: dict[str, tuple[Statistic, ...]] = field(default_factory=dict)
+    receptor_conc_per: dict[str, float | None] = field(default_factory=dict)
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -637,6 +641,7 @@ class GlobalFitResult:
             unit=self.unit,
             diagnostics=tuple(self.fit_diagnostics) + tuple(self.diagnostics_per.get(name, ())),
             statistics=self.statistics_per.get(name, ()),
+            receptor_conc=self.receptor_conc_per.get(name),
         )
 
     def report(self) -> str:
@@ -894,6 +899,7 @@ def fit_global(
         fit_diagnostics=tuple(fit_diagnostics),
         diagnostics_per={name: tuple(diagnostics) for name, diagnostics in per_diagnostics.items()},
         statistics_per={name: tuple(values) for name, values in per_statistics.items()},
+        receptor_conc_per={dataset.name: dataset.receptor_conc for dataset in problem.datasets},
     )
 
 

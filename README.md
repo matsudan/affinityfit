@@ -247,27 +247,46 @@ print(res.params["ic50"], res.params["hillslope"])
 
 A displacement IC<sub>50</sub> is not a property of the competitor alone: raising the
 concentration of the labelled ligand being displaced raises the IC<sub>50</sub> with it.
-Dividing by `1 + [tracer]/Kd_tracer` removes that dependence and makes *K*<sub>i</sub>
-comparable between assays run at different tracer concentrations.
+Dividing that dependence out makes *K*<sub>i</sub> comparable between assays run at
+different tracer concentrations.
 
 ```python
 from affinityfit import Interval, ki_from_ic50
 
-ki = ki_from_ic50(res, tracer_conc=5.0, tracer_kd=Interval(point=2.0, lower=1.6, upper=2.4))
+ki = ki_from_ic50(
+    res,
+    tracer_conc=5.0,
+    tracer_kd=Interval(point=2.0, lower=1.6, upper=2.4),
+    receptor_conc=3.45,  # selects the exact correction
+)
 print(ki.format("nM"))
 ```
 
 Pass the whole result rather than one interval out of it, and give the tracer constant
 as an `Interval` when its uncertainty is known.
 
+**Give `receptor_conc` whenever it is known.** Without it the standard Cheng–Prusoff
+form `IC50 / (1 + [T]/Kd)` is used, which assumes the receptor is dilute enough that it
+neither depletes the tracer nor takes up an appreciable share of the competitor. Where
+that fails the form is biased, and the bias does not decay for a weak competitor: it
+settles at an offset set by how much tracer the receptor holds. Measured for a receptor
+at 6.5 times the tracer constant, the approximation came out 96% high at
+*K*<sub>i</sub> = 0.05 and 9% low at *K*<sub>i</sub> = 100, in the same units. Choosing a
+different tracer concentration to plug in does not fix it: the exact denominator falls
+between the ones the total and the free tracer concentration give. With `receptor_conc`
+the exact correction is used instead, which agrees with the Munson–Rodbard result.
+`fit(..., receptor_conc=...)` is carried on the `FitResult`, so passing the result is
+enough. Without it, a `UserWarning` reports that the bias could not be assessed.
+
 **The standard form assumes a slope of 1.** It is derived for a single site under
 competition, and a fitted slope whose interval excludes 1 indicates that the derivation
 does not apply. The modified forms that cover a slope away from 1 raise the terms to
 powers and [do not agree with one another](https://pubmed.ncbi.nlm.nih.gov/12481843/),
 so the choice between them is left to the caller; the library reports the violation
-rather than applying one silently. Only the `FitResult` carries the IC<sub>50</sub> and
-the slope together, so only that overload can check it. Passing `res.intervals["ic50"]`
-computes the same number without the check.
+rather than applying one silently. Ligand depletion steepens a displacement curve, so it
+is the first cause to rule out before adopting a modified form. Only the `FitResult`
+carries the IC<sub>50</sub> and the slope together, so only that overload can check it.
+Passing `res.intervals["ic50"]` computes the same number without the check.
 
 **The tracer constant's own error usually dominates.** With `r = [T]/Kd*`, the relative
 error of `Kd*` propagates to *K*<sub>i</sub> damped by `r/(1+r)`, so at `[T] = 2.5·Kd*`
@@ -276,13 +295,12 @@ well-measured IC<sub>50</sub>. Treating `Kd*` as exact here reports ±5% where t
 experiment supports ±15%. The two are independent, so they combine in quadrature, each
 side of the interval separately; asymmetry is preserved, an undetermined limit stays
 undetermined, and a lower limit driven past zero is reported as undetermined rather than
-as a *K*<sub>i</sub> of zero. `tracer_conc` is taken as exact.
+as a *K*<sub>i</sub> of zero. `tracer_conc` and `receptor_conc` are taken as exact.
 
 For competitive enzyme inhibition the same expression applies with `[S]` and `Km`.
 
-The relation also assumes the competitor and the tracer exclude each other from one
-site, and that the free tracer concentration is close to the total. A fit cannot check
-either assumption, because the curve has the same shape in both cases.
+Both forms also assume the competitor and the tracer exclude each other from one site. A
+fit cannot check that, because the curve has the same shape either way.
 
 ### Ligand depletion
 

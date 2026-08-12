@@ -10,6 +10,11 @@ import pytest
 
 from affinityfit import Interval, fit, ic50, ki_from_ic50
 
+# Many tests below exercise the Cheng-Prusoff path on purpose, which now reports that its
+# bias cannot be assessed. The tests that assert on that warning use pytest.warns, which
+# takes precedence over this filter.
+pytestmark = pytest.mark.filterwarnings("ignore:receptor_conc was not supplied")
+
 
 def fitted(hillslope: float, seed: int = 0):
     """A dose-response fit with a known slope, noisy enough to have an interval."""
@@ -108,14 +113,16 @@ def test_a_slope_away_from_one_leaves_the_standard_form_behind():
 def test_a_slope_consistent_with_one_passes_without_comment():
     res = fitted(1.0, seed=1)
     assert res.intervals["hillslope"].contains(1.0)
-    assert user_warnings(lambda: ki_from_ic50(res, tracer_conc=5.0, tracer_kd=2.0)) == []
+    # receptor_conc is given so that only the slope could still be complained about.
+    assert user_warnings(lambda: ki_from_ic50(res, tracer_conc=5.0, tracer_kd=2.0, receptor_conc=0.05)) == []
 
 
 def test_the_slope_cannot_be_checked_from_an_interval_alone():
     """Handing over one interval hides the slope, which is the reason the result overload exists."""
     res = fitted(2.5)
     assert not res.intervals["hillslope"].contains(1.0)
-    assert user_warnings(lambda: ki_from_ic50(res.intervals["ic50"], tracer_conc=5.0, tracer_kd=2.0)) == []
+    interval = res.intervals["ic50"]
+    assert user_warnings(lambda: ki_from_ic50(interval, tracer_conc=5.0, tracer_kd=2.0, receptor_conc=0.05)) == []
 
 
 def test_a_slope_with_no_scatter_behind_it_raises_nothing():
@@ -128,7 +135,7 @@ def test_a_slope_with_no_scatter_behind_it_raises_nothing():
     conc = np.logspace(0, 4, 16)
     res = fit(conc, ic50(conc, 50.0, -100.0, 100.0, 1.0), model=ic50, unit="nM")
     assert res.intervals["hillslope"].zero_width
-    assert user_warnings(lambda: ki_from_ic50(res, tracer_conc=5.0, tracer_kd=2.0)) == []
+    assert user_warnings(lambda: ki_from_ic50(res, tracer_conc=5.0, tracer_kd=2.0, receptor_conc=0.05)) == []
 
 
 def test_a_fit_result_is_read_through_the_location_role():
@@ -217,3 +224,123 @@ def test_an_exact_ic50_with_an_uncertain_tracer_still_returns_an_interval():
 def test_an_exact_pair_still_returns_a_plain_number():
     """The simplest call keeps its simplest answer."""
     assert isinstance(ki_from_ic50(50.0, tracer_conc=5.0, tracer_kd=2.0), float)
+
+
+# ------------------------------------------- the exact correction under depletion
+
+# Conditions and target values from a published comparison of the Cheng-Prusoff
+# approximation against the exact Munson-Rodbard correction, for a receptor that is not
+# dilute against the tracer constant: [R]T = 3.45, [L]T = 17, tracer Kd = 0.53 (nM).
+DEPLETED = {"tracer_conc": 17.0, "tracer_kd": 0.53, "receptor_conc": 3.45}
+
+# true Ki -> IC50 at half displacement (nM)
+EXACT_CASES = [(0.05, 3.24), (0.1, 4.75), (0.5, 16.8), (1.0, 31.9), (10.0, 304.0), (100.0, 3020.0)]
+
+
+@pytest.mark.parametrize(("true_ki", "ic50_value"), EXACT_CASES)
+def test_exact_correction_recovers_the_true_ki_where_cheng_prusoff_is_biased(true_ki, ic50_value):
+    """With the receptor concentration the correction is exact; without it, it is not."""
+    exact = ki_from_ic50(ic50_value, **DEPLETED)
+    assert exact == pytest.approx(true_ki, rel=0.01)
+
+    with pytest.warns(UserWarning, match="receptor_conc was not supplied"):
+        approximate = ki_from_ic50(ic50_value, tracer_conc=17.0, tracer_kd=0.53)
+    assert abs(approximate - true_ki) > abs(exact - true_ki)
+
+
+def test_the_cheng_prusoff_bias_does_not_vanish_for_a_weak_competitor():
+    """The bias settles at an offset rather than decaying, because the tracer is depleted."""
+    with pytest.warns(UserWarning, match="receptor_conc was not supplied"):
+        weak = ki_from_ic50(3020.0, tracer_conc=17.0, tracer_kd=0.53)
+    # true Ki is 100; the approximation lands near 91, about 9% low
+    assert weak == pytest.approx(91.3, rel=0.01)
+    assert ki_from_ic50(3020.0, **DEPLETED) == pytest.approx(100.0, rel=0.01)
+
+
+def test_exact_and_approximate_agree_when_the_receptor_is_dilute():
+    """The correction reduces to Cheng-Prusoff in the limit the approximation assumes."""
+    dilute = ki_from_ic50(50.0, tracer_conc=5.0, tracer_kd=2.0, receptor_conc=1e-6)
+    with pytest.warns(UserWarning, match="receptor_conc was not supplied"):
+        approximate = ki_from_ic50(50.0, tracer_conc=5.0, tracer_kd=2.0)
+    assert dilute == pytest.approx(approximate, rel=1e-5)
+
+
+def test_receptor_conc_is_taken_from_the_fit_result():
+    """The value given to fit() reaches the correction without being repeated."""
+    conc = np.logspace(0, 4, 16)
+    signal = ic50(conc, 50.0, -100.0, 100.0, 1.0)
+    res = fit(conc, signal, model=ic50, receptor_conc=3.45, unit="nM")
+    assert res.receptor_conc == 3.45
+    from_result = ki_from_ic50(res, tracer_conc=17.0, tracer_kd=0.53)
+    explicit = ki_from_ic50(res.intervals["ic50"], tracer_conc=17.0, tracer_kd=0.53, receptor_conc=3.45)
+    assert from_result.point == pytest.approx(explicit.point)
+
+
+def test_an_explicit_receptor_conc_overrides_the_one_on_the_result():
+    conc = np.logspace(0, 4, 16)
+    res = fit(conc, ic50(conc, 50.0, -100.0, 100.0, 1.0), model=ic50, receptor_conc=3.45, unit="nM")
+    assert ki_from_ic50(res, tracer_conc=17.0, tracer_kd=0.53, receptor_conc=0.1).point != pytest.approx(
+        ki_from_ic50(res, tracer_conc=17.0, tracer_kd=0.53).point
+    )
+
+
+def test_a_fit_without_receptor_conc_still_warns_through_the_result():
+    conc = np.logspace(0, 4, 16)
+    res = fit(conc, ic50(conc, 50.0, -100.0, 100.0, 1.0), model=ic50, unit="nM")
+    assert res.receptor_conc is None
+    with pytest.warns(UserWarning, match="receptor_conc was not supplied"):
+        ki_from_ic50(res, tracer_conc=5.0, tracer_kd=2.0)
+
+
+def test_the_slope_warning_names_depletion_as_the_likely_cause():
+    """A steep displacement curve is what depletion produces, so the advice must say so."""
+    res = fitted(2.5)
+    with pytest.warns(UserWarning, match="[Dd]epletion") as caught:
+        ki_from_ic50(res, tracer_conc=5.0, tracer_kd=2.0, receptor_conc=0.05)
+    assert any("modified form" in str(w.message) for w in caught)
+
+
+def test_the_exact_correction_keeps_an_interval_asymmetric():
+    measured = Interval(point=40.0, lower=30.0, upper=70.0, method="profile")
+    out = ki_from_ic50(measured, **DEPLETED)
+    assert out.lower is not None
+    assert out.upper is not None
+    assert (out.upper - out.point) > (out.point - out.lower)
+    assert out.method == "profile"
+
+
+def test_the_exact_correction_folds_in_the_tracer_uncertainty():
+    tracer = Interval(point=0.53, lower=0.45, upper=0.61)
+    exact = ki_from_ic50(304.0, tracer_conc=17.0, tracer_kd=0.53, receptor_conc=3.45)
+    widened = ki_from_ic50(304.0, tracer_conc=17.0, tracer_kd=tracer, receptor_conc=3.45)
+    assert isinstance(exact, float)
+    assert widened.point == pytest.approx(exact, rel=1e-9)
+    assert widened.half_width > 0
+
+
+def test_a_receptor_that_leaves_no_free_tracer_is_refused():
+    with pytest.raises(ValueError, match="no free tracer"):
+        ki_from_ic50(50.0, tracer_conc=1.0, tracer_kd=1e-30, receptor_conc=1.0)
+
+
+def test_an_ic50_below_half_the_receptor_concentration_is_refused():
+    """The exact form subtracts [R]T/2, so such an IC50 cannot be resolved."""
+    with pytest.raises(ValueError, match="not positive"):
+        ki_from_ic50(1.0, tracer_conc=17.0, tracer_kd=0.53, receptor_conc=3.45)
+
+
+def test_a_negative_receptor_conc_is_refused():
+    with pytest.raises(ValueError, match="receptor_conc must be finite and non-negative"):
+        ki_from_ic50(50.0, tracer_conc=5.0, tracer_kd=2.0, receptor_conc=-1.0)
+
+
+def test_global_fit_passes_receptor_conc_through_result_for():
+    from affinityfit import Dataset, fit_global
+
+    conc = np.logspace(0, 4, 16)
+    res = fit_global(
+        [Dataset("a", conc, ic50(conc, 50.0, -100.0, 100.0, 1.0), receptor_conc=3.45)],
+        model=ic50,
+    )
+    assert res.receptor_conc_per["a"] == 3.45
+    assert res.result_for("a").receptor_conc == 3.45
