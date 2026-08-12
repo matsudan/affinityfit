@@ -3,7 +3,6 @@
 [![PyPI](https://img.shields.io/pypi/v/affinityfit)](https://pypi.org/project/affinityfit/)
 [![Python versions](https://img.shields.io/pypi/pyversions/affinityfit)](https://pypi.org/project/affinityfit/)
 [![ci](https://github.com/matsudan/affinityfit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/matsudan/affinityfit/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/pypi/l/affinityfit)](https://github.com/matsudan/affinityfit/blob/main/LICENSE)
 
 🚧 This library is currently under development and may change significantly.
 
@@ -63,11 +62,13 @@ string literal works the same way.
 
 The input CSV has concentration in the first column and signal in the second.
 Header rows, comment rows, and blank rows are skipped. Repeated rows at the same
-concentration are used as replicates as-is.
+concentration are kept as separate data points rather than averaged; feeding them
+to the bootstrap as replicates is a separate argument, covered below.
 
-Missing values (blank cells), `nan`, and `inf` raise an error with the row number.
-Silently dropping a blank row would change the number of points, and with it the
-degrees of freedom and the diagnostics.
+Missing values (blank cells), `nan`, and `inf` raise an error naming the line, as
+do a negative concentration and a file with fewer than 3 numeric rows. Silently
+dropping a blank row would change the number of points, and with it the degrees of
+freedom and the diagnostics.
 
 ```csv
 concentration_nM,signal
@@ -139,9 +140,10 @@ print(res.report())
 
 `fit_diagnostics` contains findings about the complete fit, while
 `diagnostics_per` keeps each dataset's findings scoped to its name. `result_for()`
-combines those fit-wide and local records into its `FitResult`. `warnings`,
-`notes`, `warnings_per`, and `notes_per` are structured severity-filtered
-convenience views; use the scoped collections above when the dataset matters.
+combines those fit-wide and local records into its `FitResult`. `warnings` and
+`notes` are severity-filtered views over both scopes at once; `warnings_per` and
+`notes_per` cover the per-dataset findings only, so reading those alone misses
+anything in `fit_diagnostics`.
 
 ## Weighting
 
@@ -167,8 +169,9 @@ between datasets would be decided by the absolute scale of sigma (whether it is
 written as a fraction, a percentage, or ppm). Mixing the two raises an error.
 
 Fitting heteroscedastic data without weights costs more than precision: **it also
-narrows the confidence interval** (measured for Kd=10 with 30% proportional error,
-95% CI coverage was 79% unweighted versus 94% with sigma supplied).
+narrows the confidence interval** (measured for Kd=10 with 30% proportional error
+and Kd near the top of the measured range, 95% CI coverage was 79% unweighted
+versus 94% with sigma supplied).
 
 The diagnostics warn when the size of the residuals grows with the fitted value.
 
@@ -178,12 +181,11 @@ The diagnostics warn when the size of the residuals grows with the fitted value.
 
 | Method | Description |
 |---|---|
-| `profile` (default) | Pins Kd and refits everything else, taking the boundary where the residual sum of squares rises significantly (an F-test). The interval can be asymmetric; when one side cannot be pinned down it comes back as, for example, `Kd > 1.6` |
+| `profile` (default) | Pins Kd and refits everything else, taking the boundary where the residual sum of squares rises significantly (an F-test). The interval can be asymmetric, and a side that cannot be pinned down comes back as `None` rather than as a number, formatted as a one-sided limit |
 | `asymptotic` | Reads the interval off the curvature of the covariance matrix. The fastest option, but can claim a finite two-sided interval even for unidentifiable data |
 | `bootstrap` | Resamples the data and refits to get the distribution of the estimate directly. Resamples replicates when given, residuals otherwise |
 
-Reporting error from repeated experiments is standard practice in this field.
-Passing replicate measurements follows that convention.
+`replicates` has shape `(n_replicates, n_points)`.
 
 ```python
 res = fit(conc, signal, ci="bootstrap", replicates=reps, n_boot=2000)
@@ -195,8 +197,9 @@ res = fit(conc, signal, ci="bootstrap", replicates=reps, n_boot=2000)
 Dataset("oxidized", conc, replicates=reps)
 ```
 
-`n_boot` must be at or above the minimum needed for a percentile interval (100),
-or it raises an error; below that, no interval can be formed.
+Under `ci="bootstrap"`, `n_boot` must be at or above the minimum needed for a
+percentile interval (100), or it raises an error; below that, no interval can be
+formed.
 
 The reported precision follows the uncertainty. A measurement with a 17% relative
 error does not warrant three significant figures, so `Kd = 4.70e-8` is reported as
@@ -342,17 +345,14 @@ parameter-sharing schemes. `aic` is kept for reference, but the uncorrected AIC 
 only asymptotically valid and favours the model with more parameters at the scale
 of a typical titration (6-15 points, 3-6 parameters, n/k of 2-5).
 
-This has been confirmed empirically as well: with fewer points, the uncorrected
-AIC tends to favour the model with more parameters.
-
 ```python
 shared.aicc < free.aicc
 fit_global(ds, model=hill).aicc < fit_global(ds, model=langmuir).aicc
 ```
 
-When the sample is too small for the correction to be defined (n − k − 1 ≤ 0),
-`aicc` is infinite. `report()` shows AICc first, with AIC in parentheses for
-reference.
+`report()` shows AICc first, with AIC in parentheses for reference. When the sample
+is too small for the correction to be defined (n − k − 1 ≤ 0), `aicc` is infinite,
+and `FitResult.report()` drops the line instead of printing an infinity.
 
 ## Diagnostics
 
@@ -368,10 +368,10 @@ whether **the measurements are placed well**.
 
 | Condition | Meaning | Code |
 |---|---|---|
-| Amplitude collapsed to near 0 | The fit is effectively a flat line; the model cannot express the shape of the data | `AMPLITUDE_COLLAPSED` |
+| Amplitude within 1% of the signal range | The fit is effectively a flat line; the model cannot express the shape of the data | `AMPLITUDE_COLLAPSED` |
 | R² < 0.5 | The model does not capture the trend in the data; the value of Kd is meaningless | `NO_FIT` |
 | R² < 0.9 | Low for a saturation curve; either noise or the wrong model | `POOR_FIT` |
-| Systematic sign in the residuals | The shape of the model does not match the mechanism, even with a high coefficient of determination | `RESIDUAL_STRUCTURE` |
+| Systematic sign in the residuals | The shape of the model does not match the mechanism, even with a high coefficient of determination. Needs at least 8 points | `RESIDUAL_STRUCTURE` |
 | A parameter stuck at a bound | That value is an artefact of the constraint, not an estimate, and cannot be reported | `PARAM_AT_BOUND` |
 | Highest concentration < 3 * Kd | Saturation not reached; Kd and Bmax cannot be mathematically separated, so the conclusion is limited to "Kd > highest concentration" | `NOT_SATURATED` |
 | Highest concentration < 10 * Kd | The estimate of Bmax is unstable, and the confidence interval on Kd widens as well | `WEAKLY_SATURATED` |
@@ -385,10 +385,10 @@ whether **the measurements are placed well**.
 | Hill coefficient n's CI contains 1 | Cooperativity cannot be claimed | `HILL_N_INCLUDES_ONE` |
 | Hill coefficient n significantly > 1 | Positive cooperativity is one reading, but depletion, self-association and a pre-equilibrium reading give the same shape. Says so when `receptor_conc` was not supplied to check the first of them | `HILL_N_ABOVE_ONE` |
 | Hill coefficient n significantly < 1 | Negative cooperativity, heterogeneous sites, or a heterogeneous sample | `HILL_N_BELOW_ONE` |
-| Residual size proportional to the fitted value | Heteroscedastic error; omitting `sigma` narrows the interval | `HETEROSCEDASTIC` |
+| Residual size proportional to the fitted value | Heteroscedastic error; omitting `sigma` narrows the interval. Needs at least 8 points, and is not checked once `sigma` is supplied | `HETEROSCEDASTIC` |
 | Zero degrees of freedom (points ≤ parameters) | The curve passes through every point by construction; no confidence interval can be computed | `NO_DEGREES_OF_FREEDOM` |
 | Rank-deficient Jacobian | Parameters cannot be told apart, so the values are not uniquely determined; more concentrations are needed | `RANK_DEFICIENT_JACOBIAN` |
-| One side of a confidence interval is undetermined | The point estimate should not be reported; sharing or a wider measured range is needed | `LIMIT_UNDETERMINED` |
+| One side of a confidence interval is undetermined | The point estimate should not be reported; sharing or a wider measured range is needed. The Hill coefficient is excluded, the `HILL_N_*` codes covering it instead | `LIMIT_UNDETERMINED` |
 | Too many bootstrap resamples failed to converge | Below the minimum for a percentile interval; the interval is reported as undetermined | `BOOTSTRAP_INSUFFICIENT_SAMPLES` |
 | Some bootstrap resamples failed to converge | The interval may be narrower than it should be, since the resamples that converge are the easier ones to fit | `BOOTSTRAP_FAILURES` |
 | Amplitude shared in a global fit rescues an unsaturated dataset | Sharing made an otherwise unidentifiable estimate possible; not a problem | `SHARED_AMPLITUDE_IDENTIFIES_LOCATION` |
@@ -415,8 +415,8 @@ as undetermined, with the reason given. The point estimate itself is still
 returned.
 
 Residuals are tested with both a runs test (Wald-Wolfowitz) and lag-1
-autocorrelation, and a warning fires if either is significant. The false-positive
-rate is kept under 2%.
+autocorrelation, and a warning fires if either crosses its threshold. The
+false-positive rate is kept under 2%.
 
 ### Statistics
 
@@ -431,9 +431,11 @@ for s in res.statistics:
 ```
 
 For several datasets, these are available per dataset through
-`GlobalFitResult.statistics_per["dataset name"]`. `residual_autocorrelation` is
-judged against a fixed threshold rather than a p-value, so its `p_value` is
-`None`.
+`GlobalFitResult.statistics_per["dataset name"]`. The names are `residual_runs`,
+`residual_autocorrelation`, and `heteroscedasticity`, plus `residual_sign_test`,
+which stands in for `residual_runs` when every residual shares a sign and the runs
+count is degenerate. `residual_autocorrelation` is judged against a fixed threshold
+rather than a p-value, so its `p_value` is `None`.
 
 ## Plotting
 
