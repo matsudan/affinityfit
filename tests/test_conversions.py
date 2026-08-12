@@ -98,7 +98,7 @@ def test_a_slope_away_from_one_leaves_the_standard_form_behind():
     """
     res = fitted(2.5)
     assert not res.intervals["hillslope"].contains(1.0)
-    with pytest.warns(UserWarning, match="1 を含みません"):
+    with pytest.warns(UserWarning, match="confidence interval that excludes 1"):
         ki = ki_from_ic50(res, tracer_conc=5.0, tracer_kd=2.0)
     # The value still comes back: the modified forms disagree with one another, so choosing
     # between them belongs to the caller rather than to this library.
