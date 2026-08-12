@@ -201,10 +201,10 @@ def _check_slope(result: FitResult) -> None:
     if not slope.bounded or slope.zero_width or slope.contains(1.0):
         return
     warnings.warn(
-        f"{result.model.label(exponent)} = {slope.format()} の信頼区間が 1 を含みません。"
-        "Cheng-Prusoff の標準形は 1 部位・競合・スロープ 1 を前提とするため、この条件では"
-        "成立しません。返り値は標準形のまま計算しているので、Ki として報告するには"
-        "べき乗を含む修正形が必要です。",
+        f"{result.model.label(exponent)} = {slope.format()} has a confidence interval that excludes 1. "
+        "The standard Cheng-Prusoff form assumes a single site, mutually exclusive competition and a "
+        "slope of 1, so it does not hold here. The value was returned from that standard form anyway; "
+        "reporting it as Ki calls for one of the modified forms that raise the terms to powers.",
         UserWarning,
         stacklevel=3,
     )
