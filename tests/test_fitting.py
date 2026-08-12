@@ -99,8 +99,10 @@ def test_sharing_bmax_rescues_unidentifiable_dataset():
     kd_shared, kd_free = [], []
     for seed in range(60):
         ds = two_state_datasets(noise=0.05, seed=seed)
-        kd_shared.append(fit_global(ds, shared=["bmax"], fixed={"baseline": 0.0}).params["reduced"]["kd"])
-        kd_free.append(fit_global(ds, fixed={"baseline": 0.0}).params["reduced"]["kd"])
+        kd_shared.append(
+            fit_global(ds, shared=["bmax"], fixed={"baseline": 0.0}, ci="asymptotic").params["reduced"]["kd"]
+        )
+        kd_free.append(fit_global(ds, fixed={"baseline": 0.0}, ci="asymptotic").params["reduced"]["kd"])
     kd_shared, kd_free = np.array(kd_shared), np.array(kd_free)
 
     assert np.median(kd_shared) == pytest.approx(KD_RED, rel=0.25)
