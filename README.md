@@ -202,8 +202,8 @@ Under `ci="bootstrap"`, `n_boot` must be at or above the minimum needed for a pe
 interval (100), or it raises an error; below that, no interval can be formed.
 
 The reported precision follows the uncertainty. A measurement with a 17% relative error
-does not warrant three significant figures, so `Kd = 4.70e-8` is reported as
-`(4.7 +/- 0.8)e-08` instead.
+does not warrant three significant figures, so `Kd = 3.80e-8` is reported as
+`(3.8 +/- 0.6)e-08` instead.
 
 ## Model
 
