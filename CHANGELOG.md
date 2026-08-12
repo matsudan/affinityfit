@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0](https://github.com/matsudan/affinityfit/compare/v0.2.0...v0.3.0) (2026-08-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* a `UserWarning` is emitted when `receptor_conc` is unavailable, since the bias of the standard form then cannot be assessed. Pass `receptor_conc=` to silence it and to get the exact correction.
+
+### Features
+
+* add the exact IC50-to-Ki correction for a depleting receptor ([#20](https://github.com/matsudan/affinityfit/issues/20)) ([e2c1d66](https://github.com/matsudan/affinityfit/commit/e2c1d661dd336f4d95626c0bc543b9fd097fa07e))
+
+
+### Bug Fixes
+
+* write the Cheng-Prusoff slope warning in English ([#15](https://github.com/matsudan/affinityfit/issues/15)) ([c21b3ec](https://github.com/matsudan/affinityfit/commit/c21b3ec501d5d83d5bcd060b6c8d0a539993fcd9))
+
+
+### Documentation
+
+* apply typographic conventions to the README ([#18](https://github.com/matsudan/affinityfit/issues/18)) ([8456167](https://github.com/matsudan/affinityfit/commit/84561670f352abc24eb36b29c49ca1f9756be441))
+* correct README statements that disagree with the implementation ([#14](https://github.com/matsudan/affinityfit/issues/14)) ([530957c](https://github.com/matsudan/affinityfit/commit/530957c9b9385482e1b52514a7aab04a8650fba0))
+* tighten README prose and give quantitative claims their conditions ([#17](https://github.com/matsudan/affinityfit/issues/17)) ([bb7bceb](https://github.com/matsudan/affinityfit/commit/bb7bceb66b7dd8116bfa12a508390b902b1f91dd))
+* use a synthetic value in the rounding example ([#19](https://github.com/matsudan/affinityfit/issues/19)) ([c7e65de](https://github.com/matsudan/affinityfit/commit/c7e65de8ba37f78db71871f90320da2f5813ebe4))
+
 ## [0.2.0](https://github.com/matsudan/affinityfit/compare/v0.1.0...v0.2.0) (2026-08-11)
 
 
