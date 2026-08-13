@@ -403,7 +403,7 @@ def _residual_structure(
     model: Model,
     params: dict[str, float],
     stats_out: list[Statistic] | None = None,
-) -> list[tuple[DiagnosticCode, str]]:
+) -> list[DiagnosticCode]:
     """Test whether the residuals are systematically arranged along the curve.
 
     A model with the wrong shape leaves long stretches of same-signed residuals even
@@ -446,7 +446,6 @@ def _residual_structure(
         return []
     n_pos = int(np.count_nonzero(nonzero > 0))
     n_neg = int(nonzero.size - n_pos)
-    pattern = "".join("+" if s > 0 else "-" for s in nonzero)
 
     if n_pos == 0 or n_neg == 0:
         # The runs count is degenerate here (always 1), so there is no runs statistic to report. What
@@ -457,13 +456,7 @@ def _residual_structure(
             stats_out.append(
                 Statistic(name="residual_sign_test", statistic=float(nonzero.size), p_value=p_sign, alpha=0.05)
             )
-        return [
-            (
-                DiagnosticCode.RESIDUAL_STRUCTURE,
-                f"残差 {nonzero.size} 点すべてが同じ符号です。フィッティングした曲線がデータ全体から"
-                "一方向にずれており、モデルが機構に合っていません。",
-            )
-        ]
+        return [DiagnosticCode.RESIDUAL_STRUCTURE]
 
     runs = 1 + int(np.count_nonzero(nonzero[1:] != nonzero[:-1]))
     total = n_pos + n_neg
@@ -487,22 +480,7 @@ def _residual_structure(
     if z >= -1.96 and autocorr <= 0.3:
         return []
 
-    # Pointing at `hill` is only useful to someone not already fitting an exponent. Suggesting it to a
-    # model that has one sends them back to what they are doing, and under ligand depletion, which is
-    # one cause of this pattern, it points away from the actual explanation.
-    suggestion = (
-        "別の機構（リガンド枯渇なら tight_binding）を検討してください。"
-        if model.exponent is not None
-        else "協同性（hill）や別の機構を検討してください。"
-    )
-    return [
-        (
-            DiagnosticCode.RESIDUAL_STRUCTURE,
-            f"残差が系統的に偏っています（符号の連 {runs} / 期待 {mean_runs:.1f}, z = {z:.2f}、"
-            f"隣接残差の自己相関 = {autocorr:.2f}）。符号の並び: {pattern}。"
-            "決定係数が高くてもモデルの形が機構に合っていません。" + suggestion,
-        )
-    ]
+    return [DiagnosticCode.RESIDUAL_STRUCTURE]
 
 
 def _no_fit(
@@ -512,7 +490,7 @@ def _no_fit(
     params: dict[str, float],
     n_estimated: int,
     stats_out: list[Statistic] | None = None,
-) -> list[tuple[DiagnosticCode, str]]:
+) -> list[DiagnosticCode]:
     """Test whether the fitted model explains the data better than its own mean would.
 
     A coefficient of determination cannot answer this for a nonlinear model: it
@@ -536,15 +514,7 @@ def _no_fit(
     if ss_tot <= 0:
         # Every measurement is identical, so the constant model already explains all of it exactly. Anything
         # the fit adds on top is noise it invented, and there is no variance left to run an F-test against.
-        if ss_res <= 0:
-            return []
-        return [
-            (
-                DiagnosticCode.NO_FIT,
-                "全ての測定値が同一で分散がなく、定数モデルで完全に説明できるにもかかわらず、"
-                f"フィットの残差平方和は {ss_res:.3g} です。フィットされた値に意味はありません。",
-            )
-        ]
+        return [] if ss_res <= 0 else [DiagnosticCode.NO_FIT]
 
     f_statistic = ((ss_tot - ss_res) / dof1) / (ss_res / dof2) if ss_res > 0 else float("inf")
     p_value = float(stats.f.sf(f_statistic, dof1, dof2)) if np.isfinite(f_statistic) else 0.0
@@ -552,15 +522,7 @@ def _no_fit(
         stats_out.append(Statistic(name="model_vs_constant", statistic=f_statistic, p_value=p_value, alpha=0.01))
     if p_value < 0.01:
         return []
-    return [
-        (
-            DiagnosticCode.NO_FIT,
-            f"フィットしたモデルは、その平均値だけの定数モデルと統計的に区別できません"
-            f"（定数モデルとのF検定 p = {p_value:.3g}）。モデルがデータの傾向を捉えていないため、"
-            "位置パラメータの値に意味はありません。モデルの選択（データの増減の向き、協同性、"
-            "別の機構）を確認してください。",
-        )
-    ]
+    return [DiagnosticCode.NO_FIT]
 
 
 def _heteroscedastic(
@@ -569,7 +531,7 @@ def _heteroscedastic(
     model: Model,
     params: dict[str, float],
     stats_out: list[Statistic] | None = None,
-) -> list[tuple[DiagnosticCode, str]]:
+) -> list[DiagnosticCode]:
     """Test whether the size of the residuals grows with the fitted value.
 
     Unweighted least squares assumes the measurement error is the same size at every
@@ -606,15 +568,7 @@ def _heteroscedastic(
         )
     if rho <= 0 or p_one_sided >= 0.01:
         return []
-    return [
-        (
-            DiagnosticCode.HETEROSCEDASTIC,
-            f"残差の大きさがフィッティング値とともに増えています（順位相関 = {rho:.2f}）。"
-            "誤差の大きさが点ごとに違うため、全点を等価値に扱うフィッティングでは精度が落ち、"
-            "信頼区間が狭く出ることがあります。蛍光・発光・吸光のように信号に比例した"
-            "誤差を持つ系では、sigma= に点ごとの標準偏差を渡してください。",
-        )
-    ]
+    return [DiagnosticCode.HETEROSCEDASTIC]
 
 
 def _diagnose_coded(
@@ -627,15 +581,12 @@ def _diagnose_coded(
     fixed_names: tuple[str, ...] = (),
     weighted: bool = False,
     stats_out: list[Statistic] | None = None,
-) -> tuple[tuple[DiagnosticCode, str], ...]:
-    """Return diagnostics as `(code, message)` pairs.
+) -> tuple[DiagnosticCode, ...]:
+    """Return the diagnostic codes that apply.
 
-    The code lets callers filter messages. For example, when the amplitude is shared
-    in a global fit, the remark that the half-saturation constant and the amplitude
+    Callers filter on these codes. For example, when the amplitude is shared in a
+    global fit, the remark that the half-saturation constant and the amplitude
     cannot be separated no longer applies and is therefore suppressed.
-
-    Messages are written in Japanese because they are advice addressed to the
-    person interpreting the fit, not part of the API surface.
 
     Args:
         conc: Ligand concentration.
@@ -656,10 +607,8 @@ def _diagnose_coded(
             whether or not they end up warranting a message. See `Statistic`.
     """
     loc = float(params[model.location])
-    loc_name = model.label(model.location)
-    amp_name = model.label(model.amplitude)
 
-    msgs: list[tuple[DiagnosticCode, str]] = []
+    msgs: list[DiagnosticCode] = []
     cmax = float(conc.max())
     cmin = float(conc.min())
     n_points = len(conc)
@@ -671,22 +620,9 @@ def _diagnose_coded(
     # still fits as a horizontal line with the amplitude collapsed to 0.
     spread = float(signal.max() - signal.min())
     amplitude = float(params[model.amplitude])
-    decreasing = _is_decreasing(conc, signal)
 
     if spread > 0 and abs(amplitude) <= 0.01 * spread:
-        detail = (
-            f"データは濃度とともに減少していますが、{model.name} モデルの {amp_name} は"
-            "非負に制限されています。減少する観測量（蛍光クエンチ、強度の減少）には "
-            "langmuir または hill を使ってください。"
-            if decreasing and model.lower(model.amplitude) >= 0.0
-            else f"モデルがデータの形を表現できていない可能性があります（データの変動幅 {spread:.3g}）。"
-        )
-        msgs.append(
-            (
-                DiagnosticCode.AMPLITUDE_COLLAPSED,
-                f"{amp_name} = {amplitude:.3g} がほぼ 0 に潰れています。フィッティングは実質的に水平線です。{detail}",
-            )
-        )
+        msgs.append(DiagnosticCode.AMPLITUDE_COLLAPSED)
 
     msgs.extend(_no_fit(conc, signal, model, params, n_estimated, stats_out))
 
@@ -699,115 +635,43 @@ def _diagnose_coded(
         msgs.extend(_heteroscedastic(conc, signal, model, params, stats_out))
 
     # --- A value stuck at a bound is a product of the constraint, not an estimate, so it cannot be reported.
-    already = {code for code, _ in msgs}
+    already = set(msgs)
     for name in model.params:
         if name in (fixed_names or ()):
             continue
         if name == model.amplitude and DiagnosticCode.AMPLITUDE_COLLAPSED in already:
             continue
         value = float(params[name])
-        for bound, side in ((model.lower(name), "下限"), (model.upper(name), "上限")):
+        for bound in (model.lower(name), model.upper(name)):
             if not np.isfinite(bound) or not _at_bound(value, bound, model.is_log_scale(name)):
                 continue
-            msgs.append(
-                (
-                    DiagnosticCode.PARAM_AT_BOUND,
-                    f"{model.label(name)} = {value:.4g} が許容範囲の{side}"
-                    f"（{bound:g}）に張り付いています。この値は推定結果ではなく制約の"
-                    "産物なので、そのまま報告できません。モデルの選択か測定範囲を"
-                    "見直してください。",
-                )
-            )
+            msgs.append(DiagnosticCode.PARAM_AT_BOUND)
             break
 
     if cmax < 3 * loc:
-        msgs.append(
-            (
-                DiagnosticCode.NOT_SATURATED,
-                f"最高濃度 {cmax:.3g} が {loc_name}={loc:.3g} の 3 倍未満です。飽和に達しておらず "
-                f"{loc_name} と {amp_name} を分離できません（結論は「{loc_name} > {cmax:.3g}」に留めるべきです）。",
-            )
-        )
+        msgs.append(DiagnosticCode.NOT_SATURATED)
     elif cmax < 10 * loc:
-        msgs.append(
-            (
-                DiagnosticCode.WEAKLY_SATURATED,
-                f"最高濃度 {cmax:.3g} が {loc_name}={loc:.3g} の 10 倍未満です。{amp_name} の推定が "
-                f"不安定で、{loc_name} の信頼区間も広がりがちです。",
-            )
-        )
+        msgs.append(DiagnosticCode.WEAKLY_SATURATED)
 
     if n_points < 2 * n_estimated:
-        msgs.append(
-            (
-                DiagnosticCode.FEW_POINTS,
-                f"データ点が {n_points} 点のみです（推定パラメータは {n_estimated} 個）。"
-                "信頼区間は参考値として扱ってください。",
-            )
-        )
+        msgs.append(DiagnosticCode.FEW_POINTS)
 
     near = int(np.count_nonzero((conc > loc / 3) & (conc < loc * 3)))
     if near == 0:
-        msgs.append(
-            (
-                DiagnosticCode.NO_POINTS_NEAR_KD,
-                f"{loc_name} 近傍（{loc / 3:.3g} 〜 {loc * 3:.3g}）に測定点がありません。"
-                f"この範囲に点を追加すると {loc_name} の精度が最も改善します。",
-            )
-        )
+        msgs.append(DiagnosticCode.NO_POINTS_NEAR_KD)
     elif near == 1:
-        msgs.append(
-            (
-                DiagnosticCode.ONE_POINT_NEAR_KD,
-                f"{loc_name} 近傍（{loc / 3:.3g} 〜 {loc * 3:.3g}）の測定点が 1 点だけです。"
-                "曲線の変曲点が 1 点に依存しています。",
-            )
-        )
+        msgs.append(DiagnosticCode.ONE_POINT_NEAR_KD)
 
     if cmin > loc:
-        msgs.append(
-            (
-                DiagnosticCode.KD_EXTRAPOLATED,
-                f"最低濃度 {cmin:.3g} が既に {loc_name}={loc:.3g} を上回っており、全点が飽和側に"
-                f"あります。{loc_name} は測定範囲より下への外挿で決まっているため、有効数字を"
-                f"増やして報告できません。{loc_name} 以下の濃度点を追加してください。",
-            )
-        )
+        msgs.append(DiagnosticCode.KD_EXTRAPOLATED)
 
     if model.baseline is not None and not np.any(conc <= loc / 10):
-        msgs.append(
-            (
-                DiagnosticCode.NO_LOW_CONC,
-                f"{loc_name} の 1/10（{loc / 10:.3g}）以下の低濃度点がありません。"
-                f"baseline が曲線と一緒に推定されるため、{amp_name} がずれる可能性があります。",
-            )
-        )
+        msgs.append(DiagnosticCode.NO_LOW_CONC)
 
     # A model that declares a receptor role already solves the depletion, so recommending one would be
     # pointing at the model in use.
     if model.receptor is None and receptor_conc is not None and receptor_conc > loc / 10:
-        # Depletion steepens the curve as well as shifting it, so a model that reads an exponent off
-        # that steepness reports cooperativity that is not there. No model solves depletion and
-        # cooperativity together, so the honest advice is to remove the depletion from the experiment
-        # rather than to switch model, and saying "use tight_binding" alone would leave a dead end.
-        if model.exponent is None:
-            also_exponent = ""
-        elif model.cooperative:
-            also_exponent = (
-                f"{model.label(model.exponent)} も 1 を上回る側に偏るため、この条件では協同性を"
-                "判定できません（枯渇と協同性を同時に解くモデルはありません）。協同性を見るには"
-                f"受容体濃度を {loc_name} の 1/10 以下にした測定が必要です。"
-            )
-        else:
-            also_exponent = f"{model.label(model.exponent)} も 1 を上回る側に偏るため、そのまま解釈できません。"
-        msgs.append(
-            (
-                DiagnosticCode.LIGAND_DEPLETION,
-                f"受容体（固定側）濃度 {receptor_conc:.3g} が {loc_name} の 1/10 を超えています。"
-                f"結合によって遊離リガンドが減るため、このモデルは {loc_name} を過大評価します。"
-                "tight_binding モデル（二次式）を使ってください。" + also_exponent,
-            )
-        )
+        msgs.append(DiagnosticCode.LIGAND_DEPLETION)
 
     # Whether the exponent differs significantly from 1 is decided by whether its interval contains 1.
     # Only an exponent the model calls cooperative is interpreted this way; a dose-response slope is a
@@ -815,77 +679,25 @@ def _diagnose_coded(
     coop = model.exponent if model.cooperative else None
     if coop is not None and intervals is not None and coop in intervals:
         n_interval = intervals[coop]
-        coop_name = model.label(coop)
         # A zero-width interval means the residuals left nothing to estimate a spread from, which is an
         # absence of information rather than perfect knowledge. Reading a direction off one would turn
         # the last bit of floating-point rounding into a claim about a mechanism, so it is refused for
         # the same reason an unbounded interval is.
         if not n_interval.bounded or n_interval.zero_width:
-            reason = (
-                "残差にばらつきがないため信頼区間が幅を持ちません"
-                if n_interval.zero_width
-                else "の信頼区間の片側が決定できません"
-            )
-            msgs.append(
-                (
-                    DiagnosticCode.HILL_N_UNDETERMINED,
-                    f"{coop_name} = {float(params[coop]):.3g} {reason}。"
-                    "協同性の有無を判定できるデータになっていません。",
-                )
-            )
+            msgs.append(DiagnosticCode.HILL_N_UNDETERMINED)
         elif n_interval.contains(1.0):
-            msgs.append(
-                (
-                    DiagnosticCode.HILL_N_INCLUDES_ONE,
-                    f"{coop_name} = {n_interval.format()} の信頼区間が 1 を含みます。"
-                    "協同性があるとは主張できません。langmuir モデルで十分か AICc で比較してください。",
-                )
-            )
+            msgs.append(DiagnosticCode.HILL_N_INCLUDES_ONE)
         elif n_interval.upper is not None and n_interval.upper < 1.0:
-            msgs.append(
-                (
-                    DiagnosticCode.HILL_N_BELOW_ONE,
-                    f"{coop_name} = {n_interval.format()} が有意に 1 を下回っています。負の協同性、"
-                    "結合サイトの不均一性、または試料の不均一性を示唆します。",
-                )
-            )
+            msgs.append(DiagnosticCode.HILL_N_BELOW_ONE)
         else:
-            # The direction people set out to claim, and the one an artefact reproduces most easily. It
-            # is caveated rather than contradicted: a steep curve does have a cooperative reading, but
-            # the same shape arrives without any cooperativity at all, so the alternatives are named.
-            # Depletion comes first because it is the one this library can rule out from an input.
-            detail = (
-                "受容体（固定側）濃度が未指定のため、枯渇によるものかを判定できていません。"
-                "receptor_conc= を渡すと枯渇の有無を検査できます。"
-                if receptor_conc is None
-                else ""
-            )
-            msgs.append(
-                (
-                    DiagnosticCode.HILL_N_ABOVE_ONE,
-                    f"{coop_name} = {n_interval.format()} が有意に 1 を上回っています。正の協同性と"
-                    "解釈できますが、協同性がなくても同じ形は生じます。リガンド枯渇（受容体濃度が "
-                    f"{loc_name} に対して希薄でない）、会合・自己集合、平衡に達していない読み出しは"
-                    "いずれも 1 を上回る側に偏らせます。これらを除外できるか確認してください。" + detail,
-                )
-            )
+            # The direction people set out to claim, and the one an artefact reproduces most easily.
+            msgs.append(DiagnosticCode.HILL_N_ABOVE_ONE)
 
     # A parameter with one undetermined limit must not be reported with significant figures.
     if intervals is not None:
-        undetermined = [
-            model.label(name)
-            for name in model.params
-            if name in intervals and not intervals[name].bounded and name != "n"
-        ]
+        undetermined = any(name in intervals and not intervals[name].bounded and name != "n" for name in model.params)
         if undetermined:
-            msgs.append(
-                (
-                    DiagnosticCode.LIMIT_UNDETERMINED,
-                    f"信頼区間の片側が決定できないパラメータがあります: {', '.join(undetermined)}。"
-                    "点推定値を有効数字つきで報告せず、片側限界として報告してください。"
-                    "パラメータの共有か、測定範囲の拡張が必要です。",
-                )
-            )
+            msgs.append(DiagnosticCode.LIMIT_UNDETERMINED)
 
     return tuple(msgs)
 
@@ -935,7 +747,7 @@ def diagnose(
     """
     return tuple(
         _diagnostic(code, "warning")
-        for code, _ in _diagnose_coded(
+        for code in _diagnose_coded(
             conc, signal, model, params, intervals, receptor_conc, fixed_names, weighted, stats_out
         )
     )
