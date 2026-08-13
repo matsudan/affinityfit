@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.4.0](https://github.com/matsudan/affinityfit/compare/v0.3.0...v0.4.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* `ci="bootstrap"` now returns an undetermined interval (`bounded=False`) for a rank-deficient fit instead of a narrow one.
+* `aicc` now returns a smaller (more negative, or less positive) value for the same fit, and requires one more data point than before to be finite rather than infinite. `DiagnosticCode.ONE_POINT_NEAR_KD` is removed; a single measurement near *K*<sub>d</sub> now reports `NO_POINTS_NEAR_KD` instead.
+* `DiagnosticCode.POOR_FIT` is removed. `DiagnosticCode.NO_FIT` now fires based on the F-test above rather than `R² < 0.5`. `diagnose()` no longer takes an `r_squared` argument.
+* `load_csv` is removed. Read the CSV with `numpy.loadtxt`, `pandas.read_csv`, or equivalent, and pass the resulting arrays to `fit()` or `Dataset` directly.
+
+### Features
+
+* replace R^2 thresholds with an F-test for NO_FIT ([#25](https://github.com/matsudan/affinityfit/issues/25)) ([169280b](https://github.com/matsudan/affinityfit/commit/169280b1f11f1cfe84c80fa06a6eed6d7bcffa79))
+
+
+### Bug Fixes
+
+* correct AICc small-sample correction and diagnostic role checks ([#27](https://github.com/matsudan/affinityfit/issues/27)) ([d8e105b](https://github.com/matsudan/affinityfit/commit/d8e105be2e5def388c1f25334daba4c431a5f0bc))
+* expand the range of the concentration axis on the example plot ([#24](https://github.com/matsudan/affinityfit/issues/24)) ([1911469](https://github.com/matsudan/affinityfit/commit/191146912c0c43a1c1353a993871733d6e6c47e0))
+* report bootstrap intervals as undetermined for a rank-deficient fit ([#28](https://github.com/matsudan/affinityfit/issues/28)) ([71a263a](https://github.com/matsudan/affinityfit/commit/71a263ac3630bf1ad3ebd6697e7a514d3dcb8535))
+
+
+### Code Refactoring
+
+* remove load_csv ([#22](https://github.com/matsudan/affinityfit/issues/22)) ([96c27c5](https://github.com/matsudan/affinityfit/commit/96c27c5764ff647c9f677e56338794795aef8437))
+
 ## [0.3.0](https://github.com/matsudan/affinityfit/compare/v0.2.0...v0.3.0) (2026-08-12)
 
 
