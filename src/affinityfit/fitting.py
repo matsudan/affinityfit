@@ -460,6 +460,7 @@ def _profile_intervals(problem: _Problem, x: NDArray[np.float64], ssr: float) ->
 def _bootstrap_intervals(
     problem: _Problem,
     x: NDArray[np.float64],
+    jac: NDArray[np.float64],
     n_boot: int,
     seed: int,
 ) -> tuple[list[Interval], int]:
@@ -468,9 +469,17 @@ def _bootstrap_intervals(
     Resamples on which the fit does not converge are counted, not merely dropped.
     Convergence is not independent of the data: the resamples that succeed are the
     ones that were easy to fit, so discarding the rest biases the interval narrow.
+
+    Each resample is refit from the point estimate `x`. Along a rank-deficient
+    direction that point sits on a ridge of equally good fits, so every resample
+    would converge back to nearly the same point regardless of which data were
+    drawn, understating the true uncertainty. This case is therefore diagnosed as
+    undetermined up front, the same as in `_asymptotic_intervals`.
     """
     if problem.n_points - problem.n_slots < 1:
         # With no degrees of freedom the residuals are identically 0, so every resample returns the same answer.
+        return _undetermined(x, "bootstrap"), 0
+    if _jacobian_rank(jac) < problem.n_slots:
         return _undetermined(x, "bootstrap"), 0
 
     rng = np.random.default_rng(seed)
@@ -792,7 +801,9 @@ def fit_global(
     elif ci == "profile":
         slot_intervals = _profile_intervals(problem, x, ssr)
     elif ci == "bootstrap":
-        slot_intervals, bootstrap_failures = _bootstrap_intervals(problem, x, n_boot, seed)
+        if jac is None:  # pragma: no cover - a solve without pinned slots always returns a Jacobian
+            raise RuntimeError("Jacobian unavailable; bootstrap intervals cannot be computed.")
+        slot_intervals, bootstrap_failures = _bootstrap_intervals(problem, x, jac, n_boot, seed)
     else:
         raise ValueError(f"Unknown ci method: {ci!r}. Use 'asymptotic', 'profile' or 'bootstrap'.")
 
