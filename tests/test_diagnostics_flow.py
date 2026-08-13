@@ -38,7 +38,7 @@ def test_result_for_carries_only_its_dataset_diagnostics():
 
 
 def test_result_for_carries_notes_as_structured_diagnostics():
-    res = fit_global(two_states(), shared=["bmax"], fixed=FIXED, ci="asymptotic")
+    res = fit_global(two_states(noise=0.01), shared=["bmax"], fixed=FIXED, ci="asymptotic")
     note = next(
         diagnostic for diagnostic in res.result_for("reduced").diagnostics if diagnostic.code.startswith("shared_")
     )
@@ -82,8 +82,8 @@ def test_global_diagnostics_keep_dataset_scope():
     reduced = codes(res.diagnostics_per["reduced"])
     assert set(res.diagnostics_per) == {"oxidized", "reduced"}
     assert "not_saturated" in oxidized and "not_saturated" in reduced
-    assert "poor_fit" not in oxidized
-    assert "poor_fit" in reduced
+    assert "no_fit" not in oxidized
+    assert "no_fit" in reduced
 
 
 # ------------------------------------------- consistency with fit()

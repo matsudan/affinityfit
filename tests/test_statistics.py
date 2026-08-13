@@ -24,11 +24,11 @@ def cooperative(n=3.0, noise=0.02, seed=0):
 # ----------------------------------------------------- FitResult.statistics
 
 
-def test_fit_result_carries_all_three_statistics_when_the_checks_apply():
+def test_fit_result_carries_all_four_statistics_when_the_checks_apply():
     conc, signal = cooperative(n=3.0)
     res = fit(conc, signal, model=langmuir)
     names = {s.name for s in res.statistics}
-    assert names == {"residual_runs", "residual_autocorrelation", "heteroscedasticity"}
+    assert names == {"model_vs_constant", "residual_runs", "residual_autocorrelation", "heteroscedasticity"}
 
 
 def test_statistic_values_match_the_diagnostic_code():
@@ -57,11 +57,15 @@ def test_autocorrelation_has_no_p_value():
     assert autocorr.alpha == 0.3
 
 
-def test_no_statistics_when_the_checks_do_not_apply():
-    """Fewer than 8 points: the residual-shape checks are skipped entirely, statistics included."""
+def test_no_residual_shape_statistics_when_the_checks_do_not_apply():
+    """Fewer than 8 points: the residual-shape checks are skipped entirely, statistics included.
+
+    The model-vs-constant check has no such minimum (an F-test needs only positive degrees of
+    freedom), so it still runs and contributes its own statistic.
+    """
     conc = np.array([0.0, 1.0, 3.0, 10.0, 30.0])
     res = fit(conc, langmuir(conc, 10.0, 1.0, 0.0) + 0.3)
-    assert res.statistics == ()
+    assert {s.name for s in res.statistics} == {"model_vs_constant"}
 
 
 def test_statistics_are_reported_even_when_no_warning_fires():
@@ -69,7 +73,12 @@ def test_statistics_are_reported_even_when_no_warning_fires():
     signal = langmuir(CONC, 10.0, 1.0, 0.02) + np.random.default_rng(4).normal(0, 0.01, CONC.size)
     res = fit(CONC, signal, model=langmuir)
     assert res.warnings == ()
-    assert {s.name for s in res.statistics} == {"residual_runs", "residual_autocorrelation", "heteroscedasticity"}
+    assert {s.name for s in res.statistics} == {
+        "model_vs_constant",
+        "residual_runs",
+        "residual_autocorrelation",
+        "heteroscedasticity",
+    }
 
 
 def test_weighted_fit_omits_the_heteroscedasticity_statistic():
@@ -129,6 +138,7 @@ def test_global_fit_keeps_statistics_separate_per_dataset():
     assert set(res.statistics_per) == {"sample_0", "sample_1", "sample_2"}
     for name in res.statistics_per:
         assert {s.name for s in res.statistics_per[name]} == {
+            "model_vs_constant",
             "residual_runs",
             "residual_autocorrelation",
             "heteroscedasticity",

@@ -77,7 +77,7 @@ def test_decreasing_data_produces_no_spurious_model_warnings():
     conc, signal = quench(noise=0.02, seed=1)
     codes = {diagnostic.code for diagnostic in fit(conc, signal).warnings}
     assert "amplitude_collapsed" not in codes
-    assert "no_fit" not in codes and "poor_fit" not in codes
+    assert "no_fit" not in codes
 
 
 def test_profile_interval_handles_a_negative_amplitude():
@@ -114,7 +114,7 @@ def test_michaelis_on_decreasing_data_says_so_and_points_at_the_fix():
     assert "no_fit" in codes
 
 
-def test_poor_fit_is_reported_for_data_the_model_cannot_describe():
+def test_no_fit_is_reported_for_data_the_model_cannot_describe():
     conc = np.linspace(1.0, 20.0, 12)
     signal = np.array([0.5, 2.0, 0.1, 1.8, 0.3, 2.2, 0.4, 1.9, 0.2, 2.1, 0.6, 1.7])
     res = fit(conc, signal)
@@ -128,16 +128,16 @@ def test_amplitude_collapse_is_machine_readable():
     assert "amplitude_collapsed" in {diagnostic.code for diagnostic in res.warnings}
 
 
-def test_no_poor_fit_warning_when_r_squared_is_unknown():
+def test_no_fit_warning_absent_for_an_exact_fit():
     from affinityfit import diagnose
 
     conc, signal = quench()
     diagnostics = diagnose(conc, signal, langmuir, {"kd": KD, "bmax": BMAX, "baseline": BASELINE})
-    assert not {"no_fit", "poor_fit"} & {diagnostic.code for diagnostic in diagnostics}
+    assert "no_fit" not in {diagnostic.code for diagnostic in diagnostics}
 
 
-def test_good_fit_does_not_trigger_the_poor_fit_warning():
+def test_good_fit_does_not_trigger_the_no_fit_warning():
     conc, signal = quench(noise=0.05, seed=7)
     res = fit(conc, signal)
     assert res.r_squared > 0.9
-    assert not {"no_fit", "poor_fit"} & {diagnostic.code for diagnostic in res.warnings}
+    assert "no_fit" not in {diagnostic.code for diagnostic in res.warnings}

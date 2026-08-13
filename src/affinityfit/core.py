@@ -51,14 +51,21 @@ class Statistic:
               and the absolute residuals. `statistic` is the correlation
               coefficient; `p_value` is one-sided for the residuals growing with
               the fitted value specifically (near 1 when they shrink instead).
+            - "model_vs_constant": F-test of the fitted model against a model with
+              no free parameters beyond the mean. `statistic` is the F-statistic;
+              `p_value` is the upper-tail probability (large when the model does
+              not explain the data better than its own mean would).
         statistic: The test statistic, in the units described above.
         p_value: One or two-sided p-value as described above, or None when the
             check has no null distribution to draw one from.
         alpha: The significance level this library itself warns at, given for
             reference. Does not apply to "residual_sign_test", which is reported
-            whenever it occurs regardless of `p_value`. A stricter level, or a
-            family-wise correction across several fits, can be applied instead by
-            comparing `p_value` directly.
+            whenever it occurs regardless of `p_value`. Nor does it apply to
+            "model_vs_constant" when the data has no variance at all (every value
+            identical): the fit is then judged against that constant directly, with
+            no p-value to compare. A stricter level, or a family-wise correction
+            across several fits, can be applied instead by comparing `p_value`
+            directly.
     """
 
     name: str
@@ -84,7 +91,6 @@ class DiagnosticCode(StrEnum):
 
     AMPLITUDE_COLLAPSED = "amplitude_collapsed"
     NO_FIT = "no_fit"
-    POOR_FIT = "poor_fit"
     RESIDUAL_STRUCTURE = "residual_structure"
     HETEROSCEDASTIC = "heteroscedastic"
     PARAM_AT_BOUND = "param_at_bound"
@@ -136,9 +142,9 @@ _DIAGNOSTIC_MESSAGES: dict[DiagnosticCode, str] = {
     DiagnosticCode.AMPLITUDE_COLLAPSED: (
         "The fitted amplitude has collapsed to nearly zero, so the fit is effectively flat."
     ),
-    DiagnosticCode.NO_FIT: "The model does not capture the data trend; the fitted location is not meaningful.",
-    DiagnosticCode.POOR_FIT: (
-        "The fit is poor for a saturation curve; the data may be noisy or the model may not match the mechanism."
+    DiagnosticCode.NO_FIT: (
+        "The fitted model is not distinguishable from a constant (F-test against the constant model), "
+        "so the fitted location is not meaningful."
     ),
     DiagnosticCode.RESIDUAL_STRUCTURE: (
         "Residuals are systematically structured, so the model may not describe the mechanism."
@@ -336,9 +342,9 @@ class FitResult:
                 lines.append(f"{label} = {self.params[name]:.4g}{suffix}  (fixed)")
             else:
                 lines.append(f"{label} = {self.intervals[name].format(unit)}")
-        lines.append(f"{'R^2'.ljust(width)} = {self.r_squared:.4f}   (n = {self.n_points})")
         if np.isfinite(self.aicc):
             lines.append(f"{'AICc'.ljust(width)} = {self.aicc:.2f}   (AIC = {self.aic:.2f})")
+        lines.append(f"{'R^2'.ljust(width)} = {self.r_squared:.4f}   (n = {self.n_points}; descriptive only)")
         lines.append("")
         lines.extend(
             f"{diagnostic.severity.upper()} [{diagnostic.code}]: {diagnostic.message}"
@@ -499,6 +505,64 @@ def _residual_structure(
     ]
 
 
+def _no_fit(
+    conc: NDArray[np.float64],
+    signal: NDArray[np.float64],
+    model: Model,
+    params: dict[str, float],
+    n_estimated: int,
+    stats_out: list[Statistic] | None = None,
+) -> list[tuple[DiagnosticCode, str]]:
+    """Test whether the fitted model explains the data better than its own mean would.
+
+    A coefficient of determination cannot answer this for a nonlinear model: it
+    depends on how far the measured concentrations happen to span, so the same
+    mechanism can read anywhere from weak to strong depending on the range chosen,
+    and a model that fits nothing at all can still land above any fixed cutoff. An
+    F-test against a model with only an intercept (its own mean) asks the well-posed
+    question instead: does the fitted shape explain the scatter significantly better
+    than no shape at all, at the 1% level chosen to match `_heteroscedastic`.
+
+    The statistic behind the verdict is appended to `stats_out` if given, whether or
+    not it ends up warranting a message.
+    """
+    dof1 = n_estimated - 1
+    dof2 = conc.size - n_estimated
+    if dof1 < 1 or dof2 < 1:
+        return []
+    fitted = model(conc, *model.ordered(params))
+    ss_res = float(np.sum((signal - fitted) ** 2))
+    ss_tot = float(np.sum((signal - signal.mean()) ** 2))
+    if ss_tot <= 0:
+        # Every measurement is identical, so the constant model already explains all of it exactly. Anything
+        # the fit adds on top is noise it invented, and there is no variance left to run an F-test against.
+        if ss_res <= 0:
+            return []
+        return [
+            (
+                DiagnosticCode.NO_FIT,
+                "全ての測定値が同一で分散がなく、定数モデルで完全に説明できるにもかかわらず、"
+                f"フィットの残差平方和は {ss_res:.3g} です。フィットされた値に意味はありません。",
+            )
+        ]
+
+    f_statistic = ((ss_tot - ss_res) / dof1) / (ss_res / dof2) if ss_res > 0 else float("inf")
+    p_value = float(stats.f.sf(f_statistic, dof1, dof2)) if np.isfinite(f_statistic) else 0.0
+    if stats_out is not None:
+        stats_out.append(Statistic(name="model_vs_constant", statistic=f_statistic, p_value=p_value, alpha=0.01))
+    if p_value < 0.01:
+        return []
+    return [
+        (
+            DiagnosticCode.NO_FIT,
+            f"フィットしたモデルは、その平均値だけの定数モデルと統計的に区別できません"
+            f"（定数モデルとのF検定 p = {p_value:.3g}）。モデルがデータの傾向を捉えていないため、"
+            "位置パラメータの値に意味はありません。モデルの選択（データの増減の向き、協同性、"
+            "別の機構）を確認してください。",
+        )
+    ]
+
+
 def _heteroscedastic(
     conc: NDArray[np.float64],
     signal: NDArray[np.float64],
@@ -560,7 +624,6 @@ def _diagnose_coded(
     params: dict[str, float],
     intervals: dict[str, Interval] | None = None,
     receptor_conc: float | None = None,
-    r_squared: float | None = None,
     fixed_names: tuple[str, ...] = (),
     weighted: bool = False,
     stats_out: list[Statistic] | None = None,
@@ -584,15 +647,13 @@ def _diagnose_coded(
         receptor_conc: Concentration of the fixed partner. Ignored when the model
             declares a `receptor` role, since such a model already solves the
             depletion this would warn about.
-        r_squared: Coefficient of determination, used to detect a model that does
-            not describe the data at all.
         fixed_names: Parameters that were held constant, exempt from the
             stuck-at-a-bound check.
         weighted: Whether per-point sigma was supplied. Suppresses the
             heteroscedasticity check, which only asks whether weights are needed.
-        stats_out: When given, the statistics behind the residual-shape and
-            heteroscedasticity checks are appended to it, whether or not they end
-            up warranting a message. See `Statistic`.
+        stats_out: When given, the statistics behind the model-vs-constant,
+            residual-shape and heteroscedasticity checks are appended to it,
+            whether or not they end up warranting a message. See `Statistic`.
     """
     loc = float(params[model.location])
     loc_name = model.label(model.location)
@@ -627,24 +688,7 @@ def _diagnose_coded(
             )
         )
 
-    if r_squared is not None and np.isfinite(r_squared):
-        if r_squared < 0.5:
-            msgs.append(
-                (
-                    DiagnosticCode.NO_FIT,
-                    f"決定係数 R^2 = {r_squared:.3g} が低く、モデルがデータの傾向を捉えていません。"
-                    f"{loc_name} の値に意味はありません。モデルの選択（データの増減の向き、"
-                    "協同性、別の機構）を確認してください。",
-                )
-            )
-        elif r_squared < 0.9:
-            msgs.append(
-                (
-                    DiagnosticCode.POOR_FIT,
-                    f"決定係数 R^2 = {r_squared:.3g} は飽和曲線としては低めです。"
-                    "ノイズが大きいか、モデルが機構に合っていない可能性があります。",
-                )
-            )
+    msgs.extend(_no_fit(conc, signal, model, params, n_estimated, stats_out))
 
     # --- Whether the residuals have systematic structure. Even with a high coefficient of determination, a
     # biased sign pattern means the shape of the model does not match the mechanism.
@@ -853,19 +897,18 @@ def diagnose(
     params: dict[str, float],
     intervals: dict[str, Interval] | None = None,
     receptor_conc: float | None = None,
-    r_squared: float | None = None,
     fixed_names: tuple[str, ...] = (),
     weighted: bool = False,
     stats_out: list[Statistic] | None = None,
 ) -> tuple[Diagnostic, ...]:
     """Judge whether the estimated parameters can be trusted.
 
-    Two families of problems are covered. The first is the health of the fit
-    itself: a collapsed amplitude, a low coefficient of determination, residuals
-    that are systematically arranged rather than scattered, and parameters stuck at
-    the edge of their allowed range. The second is the placement of the measurements:
-    saturation never reached, too few points, no points near or below the
-    half-saturation constant, ligand depletion, and a Hill coefficient whose
+    Two families of problems are covered. The first is the health of the fit itself:
+    a collapsed amplitude, a model that is not distinguishable from a constant,
+    residuals that are systematically arranged rather than scattered, and parameters
+    stuck at the edge of their allowed range. The second is the placement of the
+    measurements: saturation never reached, too few points, no points near or below
+    the half-saturation constant, ligand depletion, and a Hill coefficient whose
     interval still contains 1.
 
     Args:
@@ -878,15 +921,14 @@ def diagnose(
         receptor_conc: Concentration of the immobilised or fixed partner. Enables
             the ligand-depletion check when given, unless the model already solves
             the depletion itself.
-        r_squared: Coefficient of determination, used to detect a model that does
-            not describe the data at all.
         fixed_names: Parameters that were held constant, exempt from the
-            stuck-at-a-bound check.
+            stuck-at-a-bound check and counted as already spent when judging
+            whether the model explains the data better than its own mean would.
         weighted: Whether per-point sigma was supplied.
-        stats_out: When given, the statistic and p-value behind the residual-shape
-            and heteroscedasticity checks are appended to it. Pass a list to collect
-            them for your own multiple-comparison correction across several fits;
-            see `Statistic` and `FitResult.statistics`.
+        stats_out: When given, the statistic and p-value behind the model-vs-constant,
+            residual-shape and heteroscedasticity checks are appended to it. Pass a
+            list to collect them for your own multiple-comparison correction across
+            several fits; see `Statistic` and `FitResult.statistics`.
 
     Returns:
         A tuple of machine-readable diagnostics, empty when nothing was detected.
@@ -894,6 +936,6 @@ def diagnose(
     return tuple(
         _diagnostic(code, "warning")
         for code, _ in _diagnose_coded(
-            conc, signal, model, params, intervals, receptor_conc, r_squared, fixed_names, weighted, stats_out
+            conc, signal, model, params, intervals, receptor_conc, fixed_names, weighted, stats_out
         )
     )
