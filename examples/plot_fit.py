@@ -75,8 +75,7 @@ def plot_fit(
     positive = conc[conc > 0]
     if positive.size == 0:
         raise ValueError("No positive concentration values found.")
-    # Zero concentration cannot sit on a log axis, so it gets its own marker at 1/3 of the lowest positive value.
-    zero_position = positive.min() / 3.0
+    zero_position = min(positive.min() / 3.0, result.location / 1000.0)
     x_plot = np.where(conc > 0, conc, zero_position)
 
     curve_x, curve_y = result.curve(zero_position, positive.max() * 3.0)
