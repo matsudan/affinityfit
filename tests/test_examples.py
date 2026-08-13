@@ -102,11 +102,11 @@ def test_example_files_declare_that_they_are_synthetic():
         assert "seed=" in text, name
 
 
-def test_good_example_is_consistent_with_the_model_it_illustrates():
+def test_good_example_is_consistent_with_the_model_it_illustrates(sample):
     """「良いデータ」が協同性ありと判定されるようでは例にならない。"""
-    from affinityfit import fit, hill, load_csv
+    from affinityfit import fit, hill
 
-    conc, signal = load_csv(EXAMPLES / "titration_good.csv")
+    conc, signal = sample.read_csv(EXAMPLES / "titration_good.csv")
     res = fit(conc, signal, ci="profile")
     assert res.warnings == (), res.warnings
     assert res.r_squared > 0.999
@@ -116,10 +116,10 @@ def test_good_example_is_consistent_with_the_model_it_illustrates():
     assert res.aicc < cooperative.aicc  # 余分なパラメータは支持されない
 
 
-def test_unsaturated_example_still_shows_an_undetermined_limit():
-    from affinityfit import fit, load_csv
+def test_unsaturated_example_still_shows_an_undetermined_limit(sample):
+    from affinityfit import fit
 
-    conc, signal = load_csv(EXAMPLES / "titration_unsaturated.csv")
+    conc, signal = sample.read_csv(EXAMPLES / "titration_unsaturated.csv")
     res = fit(conc, signal, ci="profile")
     assert res.r_squared > 0.99  # 当てはまりは良く見える
     assert res.intervals["kd"].upper is None  # それでも上限は決まらない

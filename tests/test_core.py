@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from affinityfit import diagnose, fit, langmuir, load_csv
+from affinityfit import diagnose, fit, langmuir
 
 
 def make_data(kd=10.0, bmax=1.0, baseline=0.02, cmax_factor=30.0, n=12, noise=0.0, seed=0):
@@ -127,35 +127,6 @@ def test_diagnose_returns_structured_english_diagnostics():
     diagnostics = diagnose(conc, np.zeros_like(conc), michaelis, {"km": 1.6, "vmax": 1.0, "baseline": 0.0})
     assert all(diagnostic.message.isascii() for diagnostic in diagnostics)
     assert "weakly_saturated" in {diagnostic.code for diagnostic in diagnostics}
-
-
-# ------------------------------------------------------------------- CSV loading
-
-
-def test_load_csv_skips_header_and_reads_values(tmp_path):
-    path = tmp_path / "titration.csv"
-    path.write_text(
-        "concentration_nM,signal\n0,0.02\n1,0.11\n3,0.25\n10,0.51\n30,0.77\n100,0.93\n",
-        encoding="utf-8",
-    )
-    conc, signal = load_csv(path)
-    assert len(conc) == 6
-    assert conc[0] == 0.0
-    assert signal[-1] == pytest.approx(0.93)
-
-
-def test_load_csv_rejects_too_few_rows(tmp_path):
-    path = tmp_path / "short.csv"
-    path.write_text("conc,signal\n1,0.1\n2,0.2\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="Only 2 data point"):
-        load_csv(path)
-
-
-def test_load_csv_rejects_negative_concentration(tmp_path):
-    path = tmp_path / "neg.csv"
-    path.write_text("conc,signal\n-1,0.1\n2,0.2\n5,0.4\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="negative values"):
-        load_csv(path)
 
 
 # ----------------------------------------------------------- plotting data and report

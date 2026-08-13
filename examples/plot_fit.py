@@ -28,7 +28,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
-from affinityfit import MODELS, FitResult, fit, load_csv
+from affinityfit import MODELS, FitResult, fit
+
+
+def read_csv(path: str | Path) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Read `(concentration, signal)` from a two-column CSV file.
+
+    Comment lines starting with `#` and blank lines are skipped. A header row is
+    detected because it parses to `NaN` and is dropped only when it is the first row;
+    a missing or non-numeric cell elsewhere becomes `NaN`, which `fit()` rejects with
+    the offending row index rather than silently dropping it.
+    """
+    data = np.genfromtxt(path, delimiter=",", comments="#")
+    if data.ndim == 1:
+        data = data.reshape(1, -1)
+    if np.isnan(data[0]).all():
+        data = data[1:]
+    return data[:, 0], data[:, 1]
 
 
 def plot_fit(
@@ -119,10 +135,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None, help="出力 PNG。既定は入力と同じ名前")
     args = parser.parse_args(argv)
 
-    # Input errors (missing values, NaN, inconsistent rows) are reported as a ValueError carrying the line number.
-    # There is no need to show a traceback, so only the message is printed before exiting.
+    # Input errors (missing values, non-numeric cells, a negative concentration) are reported by fit() as a
+    # ValueError naming the offending array index. There is no need to show a traceback, so only the message
+    # is printed before exiting.
     try:
-        conc, signal = load_csv(args.csv)
+        conc, signal = read_csv(args.csv)
         result = fit(conc, signal, model=MODELS[args.model], unit=args.unit)
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
