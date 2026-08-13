@@ -308,11 +308,12 @@ fit cannot check that, because the curve has the same shape either way.
 Every model in the table except `tight_binding` assumes the free ligand concentration
 equals the total one. This assumption fails once the receptor is not much more dilute
 than *K*<sub>d</sub>, because each molecule bound is one fewer left in solution. The
-curve still looks like a saturation curve, and the fit statistics do not reveal the
+curve still looks like a saturation curve, and *R*<sup>2</sup> alone does not reveal the
 problem. On noiseless 1:1 data with the receptor at five times *K*<sub>d</sub> (15
 concentrations spanning 10<sup>−2</sup> to 10<sup>2</sup> times *K*<sub>d</sub> plus a
 blank, baseline held at 0), `langmuir` reports *K*<sub>d</sub> = 3.99 against a true
-1.0, at *R*<sup>2</sup> = 0.9919.
+1.0, at *R*<sup>2</sup> = 0.9919; `RESIDUAL_STRUCTURE` and `HETEROSCEDASTIC` are raised
+on the same fit and point at the mismatch that *R*<sup>2</sup> alone misses.
 
 `tight_binding` solves the 1:1 equilibrium without that assumption. Pass the total
 receptor concentration as `rt`, normally as a constant.
@@ -367,16 +368,19 @@ than only listed; without it, the warning states that the check could not be per
 Use `aicc` (the corrected Akaike information criterion) to compare models or
 parameter-sharing schemes. `aic` is kept for reference, but the uncorrected AIC is only
 asymptotically valid and favours the model with more parameters at the scale of a
-typical titration (6–15 points, 3–6 parameters, *n*/*k* of 2–5).
+typical titration (6–15 points, 3–6 fitted coefficients, *n*/*k* of 2–5 once the
+residual-variance parameter below is counted).
 
 ```python
 shared.aicc < free.aicc
 fit_global(ds, model=hill).aicc < fit_global(ds, model=langmuir).aicc
 ```
 
-`report()` shows AICc first, with AIC in parentheses for reference. When the sample
-is too small for the correction to be defined (*n* − *k* − 1 ≤ 0), `aicc` is infinite,
-and `FitResult.report()` drops the line instead of printing an infinity.
+`report()` shows AICc first, with AIC in parentheses for reference. Least squares also
+estimates the residual variance, so `k` here is one more than the number of fitted
+coefficients. When the sample is too small for the correction to be defined
+(*n* − *k* − 1 ≤ 0), `aicc` is infinite, and `FitResult.report()` drops the line
+instead of printing an infinity.
 
 ## Diagnostics
 

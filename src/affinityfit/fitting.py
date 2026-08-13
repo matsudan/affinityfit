@@ -514,9 +514,10 @@ def _corrected_aic(aic: float, n_points: int, n_params: int) -> float:
     """AICc: the Akaike criterion with the small-sample correction.
 
     Plain AIC is only asymptotically unbiased, and titrations are nowhere near that
-    limit. A typical fit here has 6 to 15 points and 3 to 6 parameters, so n/k lands
-    between 2 and 5, where AIC systematically favours the model with more parameters.
-    The correction is recommended whenever n/k is below about 40.
+    limit. A typical fit here has 6 to 15 points and 3 to 6 fitted coefficients, so
+    n/k lands between 2 and 5 once the residual-variance parameter below is counted,
+    where AIC systematically favours the model with more parameters. The correction
+    is recommended whenever n/k is below about 40.
 
     `n_params` is the number of fitted coefficients. Least squares also estimates the
     residual variance, so the parameter count entering the correction is `n_params + 1`,
