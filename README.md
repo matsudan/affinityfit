@@ -347,9 +347,10 @@ use. Two limitations apply:
 
 Depletion does not only shift the curve, it steepens it, and `hill` reads that steepness
 as an exponent. The same data as above, with no cooperativity anywhere in the system,
-fits `hill` at *n* = 1.43 [1.32, 1.54], *R*<sup>2</sup> = 0.9992. The interval excludes
-1, so the check described above (`intervals["n"].contains(1.0)`) reports cooperativity
-that does not exist.
+fits `hill` at *n* = 1.43 [1.32, 1.54]. `hill` reduces to `langmuir` exactly at *n* = 1,
+so its *R*<sup>2</sup> is higher by construction and cannot itself argue for
+cooperativity; the interval on *n* excluding 1 is what does. The check described above
+(`intervals["n"].contains(1.0)`) accordingly reports cooperativity that does not exist.
 
 No model here solves depletion and cooperativity at once. Adding one would impose an
 exact conservation law on the Hill equation, which is phenomenological to begin with.
@@ -420,9 +421,9 @@ after the fit and has no `FitResult` of its own to attach one to.
 
 In a global fit, findings whose premise is removed by sharing or fixing are suppressed.
 If `bmax` is shared, for example, `NOT_SATURATED` no longer applies and
-`SHARED_AMPLITUDE_IDENTIFIES_LOCATION` is emitted in its place. That note is
-withheld when the fit itself is broken (*R*<sup>2</sup> < 0.5, or a collapsed
-amplitude), since it would otherwise contradict the other findings.
+`SHARED_AMPLITUDE_IDENTIFIES_LOCATION` is emitted in its place. That note is withheld
+when the fit itself is broken (`NO_FIT` or `AMPLITUDE_COLLAPSED`), since it would
+otherwise contradict the other findings.
 
 In `examples/titration_unsaturated.csv`, *R*<sup>2</sup> = 0.9936 suggests a good fit,
 but the highest concentration is only a third of *K*<sub>d</sub>, so the upper limit is
