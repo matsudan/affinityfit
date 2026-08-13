@@ -693,9 +693,11 @@ def _diagnose_coded(
             # The direction people set out to claim, and the one an artefact reproduces most easily.
             msgs.append(DiagnosticCode.HILL_N_ABOVE_ONE)
 
-    # A parameter with one undetermined limit must not be reported with significant figures.
+    # A parameter with one undetermined limit must not be reported with significant figures. The
+    # cooperative exponent is excluded: HILL_N_UNDETERMINED already covers it above, by role rather
+    # than by the literal name `hill` happens to use.
     if intervals is not None:
-        undetermined = any(name in intervals and not intervals[name].bounded and name != "n" for name in model.params)
+        undetermined = any(name in intervals and not intervals[name].bounded and name != coop for name in model.params)
         if undetermined:
             msgs.append(DiagnosticCode.LIMIT_UNDETERMINED)
 
