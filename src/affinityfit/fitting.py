@@ -509,15 +509,20 @@ def _corrected_aic(aic: float, n_points: int, n_params: int) -> float:
     between 2 and 5, where AIC systematically favours the model with more parameters.
     The correction is recommended whenever n/k is below about 40.
 
+    `n_params` is the number of fitted coefficients. Least squares also estimates the
+    residual variance, so the parameter count entering the correction is `n_params + 1`,
+    following the standard convention for nonlinear regression (Hurvich and Tsai, 1989).
+
     Returns infinity when the correction is undefined, which is when the sample is too
     small to support the parameter count at all.
     """
     if not np.isfinite(aic):
         return aic
-    remaining = n_points - n_params - 1
+    k = n_params + 1
+    remaining = n_points - k - 1
     if remaining <= 0:
         return float("inf")
-    return aic + 2.0 * n_params * (n_params + 1) / remaining
+    return aic + 2.0 * k * (k + 1) / remaining
 
 
 @dataclass(frozen=True)
