@@ -98,7 +98,6 @@ class DiagnosticCode(StrEnum):
     WEAKLY_SATURATED = "weakly_saturated"
     FEW_POINTS = "few_points"
     NO_POINTS_NEAR_KD = "no_points_near_kd"
-    ONE_POINT_NEAR_KD = "one_point_near_kd"
     KD_EXTRAPOLATED = "kd_extrapolated"
     NO_LOW_CONC = "no_low_conc"
     LIGAND_DEPLETION = "ligand_depletion"
@@ -162,8 +161,9 @@ _DIAGNOSTIC_MESSAGES: dict[DiagnosticCode, str] = {
         "The measured range weakly constrains the plateau, so the location interval may be broad."
     ),
     DiagnosticCode.FEW_POINTS: "There are few data points relative to the number of estimated parameters.",
-    DiagnosticCode.NO_POINTS_NEAR_KD: "No measurements lie near the fitted half-saturation concentration.",
-    DiagnosticCode.ONE_POINT_NEAR_KD: "Only one measurement lies near the fitted half-saturation concentration.",
+    DiagnosticCode.NO_POINTS_NEAR_KD: (
+        "Fewer than two measurements lie near the fitted half-saturation concentration."
+    ),
     DiagnosticCode.KD_EXTRAPOLATED: (
         "All measurements are on the saturated side, so the location is determined by extrapolation."
     ),
@@ -657,10 +657,8 @@ def _diagnose_coded(
         msgs.append(DiagnosticCode.FEW_POINTS)
 
     near = int(np.count_nonzero((conc > loc / 3) & (conc < loc * 3)))
-    if near == 0:
+    if near < 2:
         msgs.append(DiagnosticCode.NO_POINTS_NEAR_KD)
-    elif near == 1:
-        msgs.append(DiagnosticCode.ONE_POINT_NEAR_KD)
 
     if cmin > loc:
         msgs.append(DiagnosticCode.KD_EXTRAPOLATED)
