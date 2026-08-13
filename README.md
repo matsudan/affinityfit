@@ -398,8 +398,7 @@ measurements are placed well.
 | Highest concentration < 3 × *K*<sub>d</sub> | Saturation not reached; *K*<sub>d</sub> and *B*<sub>max</sub> cannot be mathematically separated, so the conclusion is limited to "*K*<sub>d</sub> > highest concentration" | `NOT_SATURATED` |
 | Highest concentration < 10 × *K*<sub>d</sub> | The estimate of *B*<sub>max</sub> is unstable, and the confidence interval on *K*<sub>d</sub> widens as well | `WEAKLY_SATURATED` |
 | Data points < 2 × estimated parameters | Not enough information; confidence intervals are indicative only (fixed parameters are not counted) | `FEW_POINTS` |
-| No points near *K*<sub>d</sub> (*K*<sub>d</sub>/3 to 3 × *K*<sub>d</sub>) | The inflection point of the curve is underdetermined; adding points here improves the estimate the most | `NO_POINTS_NEAR_KD` |
-| One point near *K*<sub>d</sub> (*K*<sub>d</sub>/3 to 3 × *K*<sub>d</sub>) | The inflection point of the curve rests on a single point | `ONE_POINT_NEAR_KD` |
+| Fewer than two points near *K*<sub>d</sub> (*K*<sub>d</sub>/3 to 3 × *K*<sub>d</sub>) | The inflection point of the curve is underdetermined; adding points here improves the estimate the most | `NO_POINTS_NEAR_KD` |
 | Lowest concentration > *K*<sub>d</sub> | Every point sits on the saturated side; *K*<sub>d</sub> is set by extrapolation and should not be reported to extra significant figures | `KD_EXTRAPOLATED` |
 | No points at or below *K*<sub>d</sub>/10 | baseline is estimated together with the curve, which can shift *B*<sub>max</sub> | `NO_LOW_CONC` |
 | Receptor concentration > *K*<sub>d</sub>/10 | Ligand depletion causes *K*<sub>d</sub> to be overestimated; switch to `tight_binding`. Not reported when that model is already in use. With `hill`, also states that *n* is inflated and cooperativity cannot be judged at all under these conditions | `LIGAND_DEPLETION` |
