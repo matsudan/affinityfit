@@ -30,9 +30,10 @@ uv add affinityfit
 ```
 
 ```python
-from affinityfit import DiagnosticCode, fit, load_csv
+import numpy as np
+from affinityfit import DiagnosticCode, fit
 
-conc, signal = load_csv("titration.csv")
+conc, signal = np.loadtxt("titration.csv", delimiter=",", skiprows=1, unpack=True)
 res = fit(conc, signal, unit="nM")
 
 print(res.params["kd"], res.intervals["kd"].format("nM"))

@@ -9,11 +9,8 @@ set of checks serves every model.
 
 from __future__ import annotations
 
-import csv
-import math
 from dataclasses import dataclass, field
 from enum import StrEnum
-from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -363,73 +360,6 @@ def _reject_non_finite(values: NDArray[np.float64], label: str, where: str) -> N
     bad = ~np.isfinite(values)
     if bad.any():
         raise ValueError(f"{where}: {label} contains NaN or infinity at index {_positions(bad)}")
-
-
-def load_csv(path: str | Path) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Read `(concentration, signal)` from a CSV file with two or more columns.
-
-    The first column is taken as concentration and the second as signal. A row that
-    cannot be parsed as numbers is skipped as a header or comment. Repeated rows at
-    the same concentration are allowed and are used as replicates.
-
-    A row that carries a number in one column and nothing in the other is an error
-    rather than something to skip: dropping it would change the number of points, and
-    with it the degrees of freedom and the diagnostics that depend on them.
-
-    Args:
-        path: Path to the CSV file.
-
-    Returns:
-        A tuple `(conc, signal)` of arrays.
-
-    Raises:
-        ValueError: If fewer than 3 rows are numeric, a row cannot be parsed, a value
-            is missing, a value is NaN or infinite, or a concentration is negative.
-    """
-    conc: list[float] = []
-    signal: list[float] = []
-    with open(path, newline="", encoding="utf-8-sig") as handle:
-        for lineno, row in enumerate(csv.reader(handle), start=1):
-            cells = [cell.strip() for cell in row if cell.strip() != ""]
-            if not cells:
-                continue  # blank row
-            if len(cells) < 2:
-                if _looks_numeric(cells[0]):
-                    raise ValueError(
-                        f"{path}:{lineno}: one of the two values is missing: {row!r}. "
-                        "Remove the row or fill in the measurement; dropping it silently "
-                        "would change the number of points."
-                    )
-                continue  # header or comment
-            try:
-                x, y = float(cells[0]), float(cells[1])
-            except ValueError:
-                if lineno == 1 or not conc:
-                    continue  # header row
-                raise ValueError(f"{path}:{lineno}: row is not numeric: {row!r}") from None
-            if not math.isfinite(x):
-                raise ValueError(f"{path}:{lineno}: concentration is not finite: {cells[0]!r}")
-            if not math.isfinite(y):
-                raise ValueError(f"{path}:{lineno}: signal is not finite: {cells[1]!r}")
-            conc.append(x)
-            signal.append(y)
-
-    if len(conc) < 3:
-        raise ValueError(
-            f"Only {len(conc)} data point(s) found. "
-            "Fitting 3 parameters requires at least 3 points, and 6 or more in practice."
-        )
-    if min(conc) < 0:
-        raise ValueError("Concentration contains negative values.")
-    return np.asarray(conc, dtype=float), np.asarray(signal, dtype=float)
-
-
-def _looks_numeric(text: str) -> bool:
-    try:
-        float(text)
-    except ValueError:
-        return False
-    return True
 
 
 def _at_bound(value: float, bound: float, log_scale: bool) -> bool:
