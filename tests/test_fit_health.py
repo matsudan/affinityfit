@@ -88,25 +88,26 @@ def test_healthy_fit_has_no_bound_warning():
 # --------------------------------------------------------------- fit quality
 
 
-def test_low_r_squared_is_reported_as_advisory():
-    conc = np.concatenate([[0.0], np.logspace(-1, 3, 11)])
-    signal = langmuir(conc, 10.0, 1.0, 0.0) + np.random.default_rng(5).normal(0, 0.18, conc.size)
-    res = fit(conc, signal)
-    assert 0.5 < res.r_squared < 0.9
-    assert "poor_fit" in codes(res)
-
-
-def test_r_squared_near_zero_says_the_value_is_meaningless():
+def test_a_model_indistinguishable_from_its_own_mean_is_flagged():
+    """Data with no trend at all: the fitted model is no better than a flat line at the mean."""
     conc = np.linspace(1.0, 20.0, 12)
     signal = np.array([0.5, 2.0, 0.1, 1.8, 0.3, 2.2, 0.4, 1.9, 0.2, 2.1, 0.6, 1.7])
     res = fit(conc, signal)
-    assert res.r_squared < 0.5
     assert "no_fit" in codes(res)
 
 
-def test_high_r_squared_produces_no_r_squared_warning():
+def test_a_noisy_but_genuine_fit_is_not_flagged_as_no_fit():
+    """A high enough noise level lowers R^2 without making the model indistinguishable from its mean."""
+    conc = np.concatenate([[0.0], np.logspace(-1, 3, 11)])
+    signal = langmuir(conc, 10.0, 1.0, 0.0) + np.random.default_rng(5).normal(0, 0.18, conc.size)
+    res = fit(conc, signal)
+    assert res.r_squared < 0.9
+    assert "no_fit" not in codes(res)
+
+
+def test_high_r_squared_produces_no_fit_warning():
     signal = langmuir(CONC, 10.0, 1.0, 0.02) + np.random.default_rng(6).normal(0, 0.01, CONC.size)
-    assert not {"no_fit", "poor_fit"} & codes(fit(CONC, signal))
+    assert "no_fit" not in codes(fit(CONC, signal))
 
 
 # --------------------------------------------------------------- diagnose()
@@ -115,13 +116,13 @@ def test_high_r_squared_produces_no_r_squared_warning():
 def test_signal_argument_changes_the_diagnosis():
     params = {"kd": 10.0, "bmax": 1.0, "baseline": 0.0}
     exact = langmuir(CONC, *langmuir.ordered(params))
-    good = diagnose(CONC, exact, langmuir, params, r_squared=1.0)
-    bad = diagnose(CONC, exact + 0.5, langmuir, params, r_squared=0.5)
+    good = diagnose(CONC, exact, langmuir, params)
+    bad = diagnose(CONC, exact + 0.5, langmuir, params)
     assert "residual_structure" not in {diagnostic.code for diagnostic in good}
     assert "residual_structure" in {diagnostic.code for diagnostic in bad}
 
 
 def test_zero_signal_is_flagged_rather_than_silently_accepted():
     params = {"kd": 10.0, "bmax": 1.0, "baseline": 0.0}
-    diagnostics = diagnose(CONC, np.zeros_like(CONC), langmuir, params, r_squared=0.0)
+    diagnostics = diagnose(CONC, np.zeros_like(CONC), langmuir, params)
     assert {"residual_structure", "no_fit"} <= {diagnostic.code for diagnostic in diagnostics}

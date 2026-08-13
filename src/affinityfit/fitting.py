@@ -661,7 +661,9 @@ class GlobalFitResult:
             "",
         ]
         for name in self.names:
-            lines.append(f"[{name}]  R^2 = {self.r_squared_per[name]:.4f}  (n = {self.n_points_per[name]})")
+            lines.append(
+                f"[{name}]  n = {self.n_points_per[name]}, R^2 = {self.r_squared_per[name]:.4f} (descriptive only)"
+            )
             width = max(len(self.model.label(param)) for param in self.model.params)
             for param in self.model.params:
                 label = self.model.label(param).ljust(width)
@@ -672,7 +674,9 @@ class GlobalFitResult:
                     lines.append(f"  {label} = {self.intervals[name][param].format(unit)}")
             lines.append("")
 
-        lines.append(f"overall R^2 = {self.r_squared:.4f}   AICc = {self.aicc:.2f}   (AIC = {self.aic:.2f})")
+        lines.append(
+            f"overall AICc = {self.aicc:.2f}   (AIC = {self.aic:.2f})   R^2 = {self.r_squared:.4f} (descriptive only)"
+        )
         lines.extend(
             f"{diagnostic.severity.upper()} [{diagnostic.code}]: {diagnostic.message}"
             for diagnostic in self.fit_diagnostics
@@ -860,7 +864,6 @@ def fit_global(
             params[dataset.name],
             intervals[dataset.name],
             dataset.receptor_conc,
-            r2_per[dataset.name],
             tuple(fixed_d),
             dataset.sigma is not None,
             dataset_stats,

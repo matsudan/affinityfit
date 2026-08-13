@@ -392,8 +392,7 @@ measurements are placed well.
 | Condition | Meaning | Code |
 |---|---|---|
 | Amplitude within 1% of the signal range | The fit is effectively a flat line; the model cannot express the shape of the data | `AMPLITUDE_COLLAPSED` |
-| *R*<sup>2</sup> < 0.5 | The model does not capture the trend in the data; the value of *K*<sub>d</sub> is meaningless | `NO_FIT` |
-| *R*<sup>2</sup> < 0.9 | Low for a saturation curve; either noise or the wrong model | `POOR_FIT` |
+| Fitted model not distinguishable from its own mean (F-test against a constant, *P* < 0.01) | The model does not capture the trend in the data; the value of *K*<sub>d</sub> is meaningless | `NO_FIT` |
 | Systematic sign in the residuals | The shape of the model does not match the mechanism, even with a high coefficient of determination. Needs at least eight points | `RESIDUAL_STRUCTURE` |
 | A parameter stuck at a bound | That value is an artefact of the constraint, not an estimate, and cannot be reported | `PARAM_AT_BOUND` |
 | Highest concentration < 3 × *K*<sub>d</sub> | Saturation not reached; *K*<sub>d</sub> and *B*<sub>max</sub> cannot be mathematically separated, so the conclusion is limited to "*K*<sub>d</sub> > highest concentration" | `NOT_SATURATED` |
