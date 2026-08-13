@@ -857,7 +857,7 @@ def fit_global(
         loc = params[dataset.name][model.location]
         codes: set[DiagnosticCode] = set()
         dataset_stats: list[Statistic] = []
-        for code, _ in _diagnose_coded(
+        for code in _diagnose_coded(
             dataset.conc,
             dataset.observed,
             model,

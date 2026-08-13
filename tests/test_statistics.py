@@ -99,8 +99,8 @@ def test_all_residuals_one_sign_reports_a_sign_test_instead_of_runs():
     from affinityfit.core import _residual_structure
 
     collected: list[Statistic] = []
-    msgs = _residual_structure(CONC, signal, langmuir, params, collected)
-    assert msgs and "すべてが同じ符号" in msgs[0][1]
+    codes = _residual_structure(CONC, signal, langmuir, params, collected)
+    assert codes == ["residual_structure"]
     sign_test = next(s for s in collected if s.name == "residual_sign_test")
     assert sign_test.statistic == float(np.count_nonzero(np.sign(signal - langmuir(CONC, *langmuir.ordered(params)))))
     assert sign_test.p_value == pytest.approx(2.0 * 0.5**sign_test.statistic)
