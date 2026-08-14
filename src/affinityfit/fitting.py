@@ -167,12 +167,13 @@ class Dataset:
         return 1.0 / self.sigma
 
 
-class _Problem:
-    """Internal bookkeeping for a fit: parameter layout, residuals, and re-solving.
+class _ParameterLayout:
+    """Parameter bookkeeping: free/shared/fixed slot assignment and the log-scale change of variable.
 
-    Holding this separately is what lets the profile-likelihood and bootstrap code
-    re-solve the very same problem with one parameter pinned, or with resampled
-    signals, without duplicating the layout logic.
+    A fixed parameter gets no slot, a shared one a single slot, and a free one one
+    slot per dataset. Once built, this holds no reference to the datasets
+    themselves; only what the layout needed from them (an initial guess and a
+    weight per point) is kept.
     """
 
     def __init__(
@@ -182,20 +183,17 @@ class _Problem:
         shared: tuple[str, ...],
         fixed: Mapping[str, float],
     ) -> None:
-        self.datasets = list(datasets)
         self.model = model
-        self.shared = shared
         self.fixed = dict(fixed)
-        n_sets = len(self.datasets)
+        n_sets = len(datasets)
 
-        # A fixed parameter gets no slot, a shared one a single slot, a free one one slot per dataset.
         self.slots: dict[str, list[int]] = {}
         self.slot_param: list[str] = []
         self.slot_dataset: list[str | None] = []
         x0: list[float] = []
         lower: list[float] = []
         upper: list[float] = []
-        guesses = [model.initial(d.conc, d.observed) for d in self.datasets]
+        guesses = [model.initial(d.conc, d.observed) for d in datasets]
 
         for name in model.params:
             if name in self.fixed:
@@ -214,13 +212,13 @@ class _Problem:
                 lower.extend([model.lower(name)] * n_sets)
                 upper.extend([model.upper(name)] * n_sets)
                 self.slot_param.extend([name] * n_sets)
-                self.slot_dataset.extend(d.name for d in self.datasets)
+                self.slot_dataset.extend(d.name for d in datasets)
 
         self.x0 = np.clip(np.asarray(x0, dtype=float), lower, upper)
         self.lower = np.asarray(lower, dtype=float)
         self.upper = np.asarray(upper, dtype=float)
         self.n_slots = len(x0)
-        self.n_points = int(sum(d.conc.size for d in self.datasets))
+        self.n_points = int(sum(d.conc.size for d in datasets))
         # Which slots are handled on a logarithmic scale. `Model.is_log_scale` is the single definition, and both
         # the change of variable and the way the profile likelihood steps read it from here.
         self.log_slots = [model.is_log_scale(name) for name in self.slot_param]
@@ -229,36 +227,9 @@ class _Problem:
         # Without that, multiplying sigma by a constant changes the absolute size of the residuals, and the answer
         # moves with it through the optimiser's convergence test. The relative weighting between datasets has to be
         # preserved, so the normalisation applies one factor to the whole problem rather than one per dataset.
-        raw = np.concatenate([d.weights for d in self.datasets])
+        raw = np.concatenate([d.weights for d in datasets])
         scale = float(np.exp(np.mean(np.log(raw))))
-        self.point_weights = [d.weights / scale for d in self.datasets]
-
-    def _to_internal(self, x: NDArray[np.float64], slots: Sequence[int]) -> NDArray[np.float64]:
-        """Map original-space values of the given slots into optimiser space."""
-        out = np.array([x[j] for j in slots], dtype=float)
-        for position, j in enumerate(slots):
-            if self.log_slots[j]:
-                out[position] = np.log10(max(float(x[j]), float(self.lower[j])))
-        return out
-
-    def _from_internal(self, values: NDArray[np.float64], slots: Sequence[int]) -> NDArray[np.float64]:
-        """Map optimiser-space values of the given slots back to original space."""
-        out = np.array(values, dtype=float)
-        for position, j in enumerate(slots):
-            if self.log_slots[j]:
-                out[position] = 10.0 ** float(np.clip(values[position], -_LOG_LIMIT, _LOG_LIMIT))
-        return out
-
-    def _internal_bounds(self, slots: Sequence[int]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        lower = np.array([self.lower[j] for j in slots], dtype=float)
-        upper = np.array([self.upper[j] for j in slots], dtype=float)
-        for position, j in enumerate(slots):
-            if self.log_slots[j]:
-                # An infinite upper bound overflows the moment it is exponentiated, so it is held down.
-                lower[position] = max(np.log10(self.lower[j]), -_LOG_LIMIT)
-                bound = np.log10(self.upper[j]) if np.isfinite(self.upper[j]) else _LOG_LIMIT
-                upper[position] = min(bound, _LOG_LIMIT)
-        return lower, upper
+        self.point_weights = [d.weights / scale for d in datasets]
 
     def slot_of(self, param: str, dataset_index: int) -> int:
         pos = self.slots[param]
@@ -272,6 +243,99 @@ class _Problem:
             else:
                 out.append(float(x[self.slot_of(name, index)]))
         return tuple(out)
+
+    def to_internal(self, x: NDArray[np.float64], slots: Sequence[int]) -> NDArray[np.float64]:
+        """Map original-space values of the given slots into optimiser space."""
+        out = np.array([x[j] for j in slots], dtype=float)
+        for position, j in enumerate(slots):
+            if self.log_slots[j]:
+                out[position] = np.log10(max(float(x[j]), float(self.lower[j])))
+        return out
+
+    def from_internal(self, values: NDArray[np.float64], slots: Sequence[int]) -> NDArray[np.float64]:
+        """Map optimiser-space values of the given slots back to original space."""
+        out = np.array(values, dtype=float)
+        for position, j in enumerate(slots):
+            if self.log_slots[j]:
+                out[position] = 10.0 ** float(np.clip(values[position], -_LOG_LIMIT, _LOG_LIMIT))
+        return out
+
+    def internal_bounds(self, slots: Sequence[int]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        lower = np.array([self.lower[j] for j in slots], dtype=float)
+        upper = np.array([self.upper[j] for j in slots], dtype=float)
+        for position, j in enumerate(slots):
+            if self.log_slots[j]:
+                # An infinite upper bound overflows the moment it is exponentiated, so it is held down.
+                lower[position] = max(np.log10(self.lower[j]), -_LOG_LIMIT)
+                bound = np.log10(self.upper[j]) if np.isfinite(self.upper[j]) else _LOG_LIMIT
+                upper[position] = min(bound, _LOG_LIMIT)
+        return lower, upper
+
+
+class _Problem:
+    """A fit's datasets together with its parameter layout: residuals, and re-solving.
+
+    Holding this separately is what lets the profile-likelihood and bootstrap code
+    re-solve the very same problem with one parameter pinned, or with resampled
+    signals, without duplicating the layout logic.
+    """
+
+    def __init__(
+        self,
+        datasets: Sequence[Dataset],
+        model: Model,
+        shared: tuple[str, ...],
+        fixed: Mapping[str, float],
+    ) -> None:
+        self.datasets = list(datasets)
+        self.shared = shared
+        self.layout = _ParameterLayout(self.datasets, model, shared, fixed)
+
+    @property
+    def model(self) -> Model:
+        return self.layout.model
+
+    @property
+    def fixed(self) -> dict[str, float]:
+        return self.layout.fixed
+
+    @property
+    def x0(self) -> NDArray[np.float64]:
+        return self.layout.x0
+
+    @property
+    def lower(self) -> NDArray[np.float64]:
+        return self.layout.lower
+
+    @property
+    def upper(self) -> NDArray[np.float64]:
+        return self.layout.upper
+
+    @property
+    def n_slots(self) -> int:
+        return self.layout.n_slots
+
+    @property
+    def n_points(self) -> int:
+        return self.layout.n_points
+
+    @property
+    def slot_param(self) -> list[str]:
+        return self.layout.slot_param
+
+    @property
+    def log_slots(self) -> list[bool]:
+        return self.layout.log_slots
+
+    @property
+    def point_weights(self) -> list[NDArray[np.float64]]:
+        return self.layout.point_weights
+
+    def slot_of(self, param: str, dataset_index: int) -> int:
+        return self.layout.slot_of(param, dataset_index)
+
+    def unpack(self, x: NDArray[np.float64], index: int) -> tuple[float, ...]:
+        return self.layout.unpack(x, index)
 
     def residual(
         self,
@@ -313,18 +377,18 @@ class _Problem:
             res = self.residual(x, signals)
             return x, float(res @ res), None
 
-        lower, upper = self._internal_bounds(free)
+        lower, upper = self.layout.internal_bounds(free)
 
         def build(values: NDArray[np.float64]) -> NDArray[np.float64]:
             x = np.empty(self.n_slots, dtype=float)
-            x[free] = self._from_internal(values, free)
+            x[free] = self.layout.from_internal(values, free)
             for j, v in pinned.items():
                 x[j] = v
             return x
 
         sol = least_squares(
             lambda values: self.residual(build(values), signals),
-            x0=np.clip(self._to_internal(start, free), lower, upper),
+            x0=np.clip(self.layout.to_internal(start, free), lower, upper),
             bounds=(lower, upper),
             x_scale="jac",
             max_nfev=20000,

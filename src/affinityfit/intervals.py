@@ -62,14 +62,29 @@ class FittedProblem(Protocol):
     on the layout and solving mechanics that produce one.
     """
 
-    model: Model
-    slot_param: list[str]
-    n_slots: int
-    n_points: int
-    lower: NDArray[np.float64]
-    upper: NDArray[np.float64]
-    log_slots: list[bool]
-    point_weights: list[NDArray[np.float64]]
+    @property
+    def model(self) -> Model: ...
+
+    @property
+    def slot_param(self) -> list[str]: ...
+
+    @property
+    def n_slots(self) -> int: ...
+
+    @property
+    def n_points(self) -> int: ...
+
+    @property
+    def lower(self) -> NDArray[np.float64]: ...
+
+    @property
+    def upper(self) -> NDArray[np.float64]: ...
+
+    @property
+    def log_slots(self) -> list[bool]: ...
+
+    @property
+    def point_weights(self) -> list[NDArray[np.float64]]: ...
 
     @property
     def datasets(self) -> Sequence[_FittedDataset]: ...
