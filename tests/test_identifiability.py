@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from affinityfit import Dataset, fit, fit_global, hill, langmuir
-from affinityfit.fitting import _jacobian_rank
+from affinityfit.intervals import _jacobian_rank
 
 METHODS = ("asymptotic", "profile", "bootstrap")
 
