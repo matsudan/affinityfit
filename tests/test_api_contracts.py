@@ -14,7 +14,8 @@ import numpy as np
 import pytest
 
 from affinityfit import Dataset, Diagnostic, DiagnosticCode, diagnose, fit, fit_global, hill, langmuir
-from affinityfit.uncertainty import Interval, profile_bounds
+from affinityfit.intervals import profile_bounds
+from affinityfit.uncertainty import Interval
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 12)])
 EXACT = langmuir(CONC, 10.0, 1.0, 0.02)

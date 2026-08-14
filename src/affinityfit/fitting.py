@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import stats
 from scipy.optimize import least_squares
 
 from affinityfit.core import (
@@ -36,15 +35,14 @@ from affinityfit.core import (
     _diagnose_coded,
     _diagnostic,
 )
-from affinityfit.models import Model, langmuir
-from affinityfit.uncertainty import (
-    MIN_BOOTSTRAP_SAMPLES,
-    SEARCH_SPAN,
-    Interval,
-    Method,
-    percentile_interval,
-    profile_bounds,
+from affinityfit.intervals import (
+    _jacobian_rank,
+    asymptotic_intervals,
+    bootstrap_intervals,
+    profile_intervals,
 )
+from affinityfit.models import Model, langmuir
+from affinityfit.uncertainty import MIN_BOOTSTRAP_SAMPLES, Interval, Method
 
 # Cap on the exponent when a log-scale parameter is turned back into a plain value (10**309 is not representable).
 _LOG_LIMIT = 300.0
@@ -301,7 +299,7 @@ class _Problem:
         Values passed in and returned are always in original parameter space; the
         logarithmic change of variable is confined to this method. The Jacobian,
         however, is with respect to the optimiser's variables, which
-        `_asymptotic_intervals` accounts for.
+        `intervals.asymptotic_intervals` accounts for.
 
         Returns:
             `(x, ssr, jac)` where `jac` is None when slots were pinned.
@@ -334,192 +332,6 @@ class _Problem:
         if not sol.success:
             raise RuntimeError(f"Optimization did not converge: {sol.message}")
         return build(sol.x), float(sol.fun @ sol.fun), (sol.jac if not pinned else None)
-
-
-def _jacobian_rank(jac: NDArray[np.float64]) -> int:
-    """Numerical rank of the Jacobian, computed after normalising the columns.
-
-    Without normalisation the rank test is dominated by whichever parameter happens
-    to have the largest derivative, which for a logarithmically fitted concentration
-    constant can be many orders of magnitude away from the others.
-    """
-    norms = np.linalg.norm(jac, axis=0)
-    scaled = jac / np.where(norms > 0.0, norms, 1.0)
-    return int(np.linalg.matrix_rank(scaled, tol=1e-8))
-
-
-def _undetermined(x: NDArray[np.float64], method: Method) -> list[Interval]:
-    return [Interval(point=float(v), lower=None, upper=None, method=method) for v in x]
-
-
-def _asymptotic_intervals(
-    problem: _Problem,
-    x: NDArray[np.float64],
-    ssr: float,
-    jac: NDArray[np.float64],
-) -> list[Interval]:
-    """Intervals from the curvature of the sum-of-squares surface at the optimum.
-
-    The Jacobian is with respect to the optimiser's variables, so for a parameter
-    fitted as a logarithm the interval is formed in the logarithm and then mapped
-    back by exponentiation. That keeps the result multiplicative, which both matches
-    how affinities are reported and guarantees a positive lower limit for a
-    concentration constant.
-
-    Two situations make the covariance meaningless, and both yield undetermined
-    intervals rather than a number.
-
-    - No degrees of freedom. With as many parameters as points the curve passes
-      through every point by construction, leaving no residual variance to estimate a
-      spread from.
-    - A rank-deficient Jacobian. `pinv` discards the singular directions without
-      complaint, so a parameter the data cannot pin down would come back with a tiny
-      interval.
-    """
-    dof = problem.n_points - problem.n_slots
-    if dof < 1 or _jacobian_rank(jac) < problem.n_slots:
-        return _undetermined(x, "asymptotic")
-
-    try:
-        jtj_inv = np.linalg.pinv(jac.T @ jac)
-        stderr = np.sqrt(np.clip(np.diag(jtj_inv) * ssr / dof, 0.0, np.inf))
-    except np.linalg.LinAlgError:  # pragma: no cover - numerically rare
-        stderr = np.full(problem.n_slots, np.nan)
-    half = float(stats.t.ppf(0.975, dof)) * stderr
-
-    intervals: list[Interval] = []
-    for j in range(problem.n_slots):
-        value = float(x[j])
-        # A half-width too large to represent as an exponent means the curvature is near 0, a sign that the parameter
-        # is unidentifiable, and exponentiating it gives inf. An infinite limit is no limit, so return undetermined.
-        if not np.isfinite(half[j]) or (problem.log_slots[j] and half[j] >= _LOG_LIMIT):
-            intervals.append(Interval(point=value, lower=None, upper=None, method="asymptotic"))
-            continue
-        if problem.log_slots[j]:
-            lower, upper = value * 10.0 ** (-half[j]), value * 10.0 ** (+half[j])
-        else:
-            lower, upper = value - half[j], value + half[j]
-        if not (np.isfinite(lower) and np.isfinite(upper)):
-            intervals.append(Interval(point=value, lower=None, upper=None, method="asymptotic"))
-            continue
-        intervals.append(Interval(point=value, lower=float(lower), upper=float(upper), method="asymptotic"))
-    return intervals
-
-
-def _profile_intervals(problem: _Problem, x: NDArray[np.float64], ssr: float) -> list[Interval]:
-    dof = problem.n_points - problem.n_slots
-    if dof < 1:
-        return [Interval(point=float(v), lower=None, upper=None, method="profile") for v in x]
-    threshold = ssr * (1.0 + float(stats.f.ppf(0.95, 1, dof)) / dof)
-
-    all_conc = np.concatenate([d.conc for d in problem.datasets])
-    positive_conc = all_conc[all_conc > 0]
-    conc_max = float(positive_conc.max()) if positive_conc.size else 1.0
-    conc_min = float(positive_conc.min()) if positive_conc.size else 1e-6
-    signal_scale = float(max(np.abs(np.concatenate([d.observed for d in problem.datasets])).max(), 1e-12))
-
-    intervals: list[Interval] = []
-    for j in range(problem.n_slots):
-        param = problem.slot_param[j]
-        # The search range comes from the scale of the measured data, so a diverged point estimate does not affect it.
-        if param == problem.model.location:
-            search_lo, search_hi = conc_min / SEARCH_SPAN, conc_max * SEARCH_SPAN
-        elif param in (problem.model.amplitude, problem.model.baseline):
-            # Amplitude and baseline carry a sign, so the negative side is searched too.
-            search_lo, search_hi = -signal_scale * SEARCH_SPAN, signal_scale * SEARCH_SPAN
-        else:
-            search_lo, search_hi = problem.lower[j], problem.upper[j]
-        # Clip at the model's own bounds, such as Vmax >= 0 for michaelis.
-        search_lo = max(search_lo, float(problem.lower[j]))
-        search_hi = min(search_hi, float(problem.upper[j]))
-
-        # Each step outward restarts from the previous solution, because re-solving from the optimum every time makes
-        # the inner optimisation more likely to fail. When the direction changes, reset to the optimum so that the
-        # upper limit does not depend on the search that produced the lower one.
-        state = {"x": x}
-
-        def ssr_at(value: float, slot: int = j, state: dict = state) -> float | None:
-            # When the inner refit does not converge, mark that direction as undetermined rather than failing the
-            # whole fit. Substituting inf would be indistinguishable from exceeding the threshold.
-            try:
-                solved, ssr_value, _ = problem.solve(x_start=state["x"], pinned={slot: value})
-            except (RuntimeError, ValueError):
-                return None
-            if not np.isfinite(ssr_value):
-                return None
-            state["x"] = solved
-            return ssr_value
-
-        def reset_warm_start(state: dict = state, start: NDArray[np.float64] = x) -> None:
-            state["x"] = start
-
-        lo, hi = profile_bounds(
-            ssr_at,
-            best=float(x[j]),
-            ssr_min=ssr,
-            threshold=threshold,
-            search_lower=search_lo,
-            search_upper=search_hi,
-            # Use the value `_Problem` holds rather than rebuilding the test from the bounds (defined in one place).
-            log_scale=problem.log_slots[j],
-            step=max(abs(float(x[j])) * 0.1, signal_scale * 1e-3),
-            on_direction_start=reset_warm_start,
-        )
-        intervals.append(Interval(point=float(x[j]), lower=lo, upper=hi, method="profile"))
-    return intervals
-
-
-def _bootstrap_intervals(
-    problem: _Problem,
-    x: NDArray[np.float64],
-    jac: NDArray[np.float64],
-    n_boot: int,
-    seed: int,
-) -> tuple[list[Interval], int]:
-    """Percentile intervals from resampled data, plus the number of failed resamples.
-
-    Resamples on which the fit does not converge are counted, not merely dropped.
-    Convergence is not independent of the data: the resamples that succeed are the
-    ones that were easy to fit, so discarding the rest biases the interval narrow.
-
-    Each resample is refit from the point estimate `x`. Along a rank-deficient
-    direction that point sits on a ridge of equally good fits, so every resample
-    would converge back to nearly the same point regardless of which data were
-    drawn, understating the true uncertainty. This case is therefore diagnosed as
-    undetermined up front, the same as in `_asymptotic_intervals`.
-    """
-    if problem.n_points - problem.n_slots < 1:
-        # With no degrees of freedom the residuals are identically 0, so every resample returns the same answer.
-        return _undetermined(x, "bootstrap"), 0
-    if _jacobian_rank(jac) < problem.n_slots:
-        return _undetermined(x, "bootstrap"), 0
-
-    rng = np.random.default_rng(seed)
-    fitted = [problem.model(d.conc, *problem.unpack(x, i)) for i, d in enumerate(problem.datasets)]
-    # Residuals are standardised by sigma before resampling and then multiplied by the per-point sigma again. Mixing
-    # the raw residuals would lose the structure of the error varying in size from point to point.
-    standardized = [(d.observed - fitted[i]) * problem.point_weights[i] for i, d in enumerate(problem.datasets)]
-
-    samples = np.full((n_boot, problem.n_slots), np.nan)
-    failures = 0
-    for b in range(n_boot):
-        signals: list[NDArray[np.float64]] = []
-        for i, d in enumerate(problem.datasets):
-            if d.replicates is not None:
-                pick = rng.integers(0, d.replicates.shape[0], size=d.conc.size)
-                signals.append(d.replicates[pick, np.arange(d.conc.size)])
-            else:
-                drawn = rng.choice(standardized[i], size=d.conc.size, replace=True)
-                signals.append(fitted[i] + drawn / problem.point_weights[i])
-        try:
-            samples[b] = problem.solve(x_start=x, signals=signals)[0]
-        except (RuntimeError, ValueError):
-            failures += 1
-
-    successes = n_boot - failures
-    if successes < MIN_BOOTSTRAP_SAMPLES:
-        return _undetermined(x, "bootstrap"), failures
-    return [percentile_interval(samples[:, j], float(x[j])) for j in range(problem.n_slots)], failures
 
 
 def _corrected_aic(aic: float, n_points: int, n_params: int) -> float:
@@ -810,13 +622,13 @@ def fit_global(
     if ci == "asymptotic":
         if jac is None:  # pragma: no cover - a solve without pinned slots always returns a Jacobian
             raise RuntimeError("Jacobian unavailable; asymptotic intervals cannot be computed.")
-        slot_intervals = _asymptotic_intervals(problem, x, ssr, jac)
+        slot_intervals = asymptotic_intervals(problem, x, ssr, jac)
     elif ci == "profile":
-        slot_intervals = _profile_intervals(problem, x, ssr)
+        slot_intervals = profile_intervals(problem, x, ssr)
     elif ci == "bootstrap":
         if jac is None:  # pragma: no cover - a solve without pinned slots always returns a Jacobian
             raise RuntimeError("Jacobian unavailable; bootstrap intervals cannot be computed.")
-        slot_intervals, bootstrap_failures = _bootstrap_intervals(problem, x, jac, n_boot, seed)
+        slot_intervals, bootstrap_failures = bootstrap_intervals(problem, x, jac, n_boot, seed)
     else:
         raise ValueError(f"Unknown ci method: {ci!r}. Use 'asymptotic', 'profile' or 'bootstrap'.")
 

@@ -14,12 +14,8 @@ import pytest
 from scipy import stats
 
 from affinityfit import Dataset, fit, fit_global, hill, langmuir
-from affinityfit.uncertainty import (
-    Interval,
-    _significant,
-    _spans_orders_of_magnitude,
-    format_with_uncertainty,
-)
+from affinityfit.formatting import _significant, _spans_orders_of_magnitude, format_with_uncertainty
+from affinityfit.uncertainty import Interval
 
 # A measured range that reaches only 0.18 times Kd = 9.0 mM: 0.2-1.6 mM.
 L_NARROW = np.array([0.2, 0.32, 0.5, 0.8, 1.1, 1.6])

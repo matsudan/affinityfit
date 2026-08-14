@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from affinityfit import Dataset, fit, fit_global, fitting, hill, langmuir, michaelis
+from affinityfit import Dataset, fit, fit_global, hill, intervals, langmuir, michaelis
 from affinityfit.fitting import _Problem
 from affinityfit.models import Model
 
@@ -124,13 +124,13 @@ def test_profile_walk_uses_the_models_definition_not_the_bounds(monkeypatch):
     pin the agreement down.
     """
     recorded: list[bool] = []
-    original = fitting.profile_bounds
+    original = intervals.profile_bounds
 
     def spy(*args, **kwargs):
         recorded.append(bool(kwargs["log_scale"]))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(fitting, "profile_bounds", spy)
+    monkeypatch.setattr(intervals, "profile_bounds", spy)
 
     conc = np.concatenate([[0.0], np.logspace(-1, 3, 15)])
     signal = hill(conc, 10.0, 1.0, 0.0, 2.0) + np.random.default_rng(0).normal(0, 0.01, conc.size)
