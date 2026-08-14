@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from affinityfit import Dataset, fit, fit_global, hill, langmuir, michaelis
-from affinityfit.core import _is_decreasing
+from affinityfit.models import _is_decreasing
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 11)])
 # fluorescence quenching: starts from a baseline of 1.0 and falls to 0.2 on binding

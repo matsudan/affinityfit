@@ -13,14 +13,7 @@ from collections.abc import Callable
 from typing import overload
 
 from affinityfit.core import FitResult
-from affinityfit.uncertainty import Interval, Method
-
-
-def _finite(value: float | None) -> float | None:
-    """The value when it is usable as a limit, otherwise None."""
-    if value is None or not math.isfinite(value):
-        return None
-    return value
+from affinityfit.uncertainty import Interval, Method, _finite
 
 
 def _tracer_kd_point(tracer_kd: float | Interval) -> float:

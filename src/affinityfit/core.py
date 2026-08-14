@@ -355,19 +355,6 @@ class FitResult:
         return "\n".join(lines)
 
 
-def _positions(mask: NDArray[np.bool_], limit: int = 5) -> str:
-    """Human-readable list of the offending indices, truncated."""
-    indices = np.flatnonzero(mask).tolist()
-    shown = ", ".join(str(i) for i in indices[:limit])
-    return shown if len(indices) <= limit else f"{shown}, ... ({len(indices)} total)"
-
-
-def _reject_non_finite(values: NDArray[np.float64], label: str, where: str) -> None:
-    bad = ~np.isfinite(values)
-    if bad.any():
-        raise ValueError(f"{where}: {label} contains NaN or infinity at index {_positions(bad)}")
-
-
 def _at_bound(value: float, bound: float, log_scale: bool) -> bool:
     """Whether a value sits at one of its bounds, judged on the parameter's own scale.
 
@@ -384,17 +371,6 @@ def _at_bound(value: float, bound: float, log_scale: bool) -> bool:
     if scale == 0.0:
         return True  # both the value and the bound are 0
     return bool(abs(value - bound) <= 1e-6 * scale)
-
-
-def _is_decreasing(conc: NDArray[np.float64], signal: NDArray[np.float64]) -> bool:
-    """Whether the signal falls as the concentration rises.
-
-    Compares the mean of the lower half of the concentrations with that of the upper
-    half, which is robust to noise on individual points.
-    """
-    order = np.argsort(conc)
-    half = max(1, len(conc) // 2)
-    return bool(signal[order[-half:]].mean() < signal[order[:half]].mean())
 
 
 def _residual_structure(

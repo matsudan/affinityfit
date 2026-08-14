@@ -35,7 +35,6 @@ from affinityfit.core import (
     Statistic,
     _diagnose_coded,
     _diagnostic,
-    _reject_non_finite,
 )
 from affinityfit.models import Model, langmuir
 from affinityfit.uncertainty import (
@@ -49,6 +48,19 @@ from affinityfit.uncertainty import (
 
 # Cap on the exponent when a log-scale parameter is turned back into a plain value (10**309 is not representable).
 _LOG_LIMIT = 300.0
+
+
+def _positions(mask: NDArray[np.bool_], limit: int = 5) -> str:
+    """Human-readable list of the offending indices, truncated."""
+    indices = np.flatnonzero(mask).tolist()
+    shown = ", ".join(str(i) for i in indices[:limit])
+    return shown if len(indices) <= limit else f"{shown}, ... ({len(indices)} total)"
+
+
+def _reject_non_finite(values: NDArray[np.float64], label: str, where: str) -> None:
+    bad = ~np.isfinite(values)
+    if bad.any():
+        raise ValueError(f"{where}: {label} contains NaN or infinity at index {_positions(bad)}")
 
 
 @dataclass(frozen=True, eq=False)

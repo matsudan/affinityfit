@@ -33,6 +33,14 @@ from numpy.typing import NDArray
 
 Method = Literal["asymptotic", "profile", "bootstrap"]
 
+
+def _finite(value: float | None) -> float | None:
+    """The value itself when it is a usable limit, otherwise None."""
+    if value is None or not math.isfinite(value):
+        return None
+    return value
+
+
 # Fewest successful bootstrap samples needed to form a percentile interval. The 2.5 / 97.5 percentiles are
 # estimated from the tails, so with fewer samples than this the ends of the interval rest on a few points.
 MIN_BOOTSTRAP_SAMPLES = 100
@@ -66,14 +74,7 @@ class Interval:
         undetermined. Treating infinity as a limit would let it slip past the checks
         that exist for None.
         """
-        return self._finite(self.lower) is not None and self._finite(self.upper) is not None
-
-    @staticmethod
-    def _finite(value: float | None) -> float | None:
-        """The value itself when it is a usable limit, otherwise None."""
-        if value is None or not math.isfinite(value):
-            return None
-        return value
+        return _finite(self.lower) is not None and _finite(self.upper) is not None
 
     @property
     def half_width(self) -> float:
@@ -82,7 +83,7 @@ class Interval:
         Provided for the common case of a roughly symmetric interval. Prefer
         `lower` and `upper` when the interval may be skewed.
         """
-        lower, upper = self._finite(self.lower), self._finite(self.upper)
+        lower, upper = _finite(self.lower), _finite(self.upper)
         if lower is None or upper is None:
             return math.inf
         return (upper - lower) / 2.0
@@ -95,13 +96,13 @@ class Interval:
         so the interval collapses. Reported as such rather than as a bare number,
         which would read as an uncertainty that was never assessed.
         """
-        lower, upper = self._finite(self.lower), self._finite(self.upper)
+        lower, upper = _finite(self.lower), _finite(self.upper)
         return lower is not None and lower == upper
 
     @property
     def symmetric(self) -> bool:
         """True when the two sides differ by less than a tenth of the width."""
-        lower, upper = self._finite(self.lower), self._finite(self.upper)
+        lower, upper = _finite(self.lower), _finite(self.upper)
         if lower is None or upper is None:
             return False
         up, down = upper - self.point, self.point - lower
@@ -110,7 +111,7 @@ class Interval:
 
     def contains(self, value: float) -> bool:
         """Whether a value lies inside the interval, treating None as unbounded."""
-        lower, upper = self._finite(self.lower), self._finite(self.upper)
+        lower, upper = _finite(self.lower), _finite(self.upper)
         if lower is not None and value < lower:
             return False
         return not (upper is not None and value > upper)
@@ -118,7 +119,7 @@ class Interval:
     def format(self, unit: str = "") -> str:
         """Render the estimate with a precision justified by its uncertainty."""
         suffix = f" {unit}" if unit else ""
-        lower, upper = self._finite(self.lower), self._finite(self.upper)
+        lower, upper = _finite(self.lower), _finite(self.upper)
         if upper is None:
             if lower is None:
                 # The point estimate only stopped somewhere along a flat valley, so it is shown to few digits.
