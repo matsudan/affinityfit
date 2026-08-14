@@ -179,6 +179,17 @@ def _tight_binding(
 # ---------------------------------------------------------------- initial guesses
 
 
+def _is_decreasing(conc: NDArray[np.float64], signal: NDArray[np.float64]) -> bool:
+    """Whether the signal falls as the concentration rises.
+
+    Compares the mean of the lower half of the concentrations with that of the upper
+    half, which is robust to noise on individual points.
+    """
+    order = np.argsort(conc)
+    half = max(1, len(conc) // 2)
+    return bool(signal[order[-half:]].mean() < signal[order[:half]].mean())
+
+
 def _guess_saturation(conc: NDArray[np.float64], signal: NDArray[np.float64]) -> dict[str, float]:
     baseline0 = float(signal[np.argmin(conc)])
     spread = float(signal.max() - signal.min())
@@ -187,11 +198,7 @@ def _guess_saturation(conc: NDArray[np.float64], signal: NDArray[np.float64]) ->
 
     # The sign of the amplitude is taken from the direction of the data. It is negative for an observable
     # that decreases on binding, such as fluorescence quenching.
-    order = np.argsort(conc)
-    half = max(1, len(conc) // 2)
-    low = float(signal[order[:half]].mean())
-    high = float(signal[order[-half:]].mean())
-    bmax0 = spread if high >= low else -spread
+    bmax0 = -spread if _is_decreasing(conc, signal) else spread
 
     target = baseline0 + bmax0 / 2.0
     kd0 = float(conc[np.argmin(np.abs(signal - target))])
