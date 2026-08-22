@@ -84,37 +84,39 @@ def _map_limits(
     measured: float | Interval,
     convert: Callable[[float], float],
 ) -> tuple[float, float | None, float | None]:
-    """Convert the IC50 and return its limits as relative widths of the resulting Ki.
+    """Convert the IC50 point and limits through the affine Ki correction.
 
-    Both forms are affine in IC50, so each limit maps through directly. Relative widths
-    are what the tracer term is later added to in quadrature, and `None` on a side keeps
-    that side undetermined all the way through.
+    Absolute endpoints are retained because a percentile interval need not contain its
+    point estimate. Converting an endpoint to a signed width and then taking its
+    magnitude would reflect such an endpoint across the point.
 
-    A limit that maps to zero or below is returned as undetermined rather than as a Ki of
-    zero, which would read as infinitely tight binding. The exact form subtracts
-    `[R]T/2`, so this is reachable for a competitor tight enough that its IC50 approaches
-    half the receptor concentration.
+    A limit that maps to zero, below zero, or a non-finite value is returned as
+    undetermined rather than as a Ki of zero. The exact form subtracts `[R]T/2`, so this
+    is reachable for a competitor tight enough that its IC50 approaches half the
+    receptor concentration.
     """
 
     def positive(value: float) -> float:
-        if value <= 0:
+        if not math.isfinite(value) or value <= 0:
             raise ValueError(
-                "The corrected Ki is not positive, so the IC50 is too close to half the "
-                "receptor concentration for the correction to resolve it."
+                "The corrected Ki is not positive or finite, so the IC50 is too close to "
+                "half the receptor concentration for the correction to resolve it."
             )
         return value
 
+    def mapped_limit(value: float | None) -> float | None:
+        if value is None:
+            return None
+        mapped = convert(value)
+        return mapped if math.isfinite(mapped) and mapped > 0 else None
+
+    point = positive(convert(measured.point if isinstance(measured, Interval) else measured))
     if not isinstance(measured, Interval):
         # Nothing was claimed about the spread, so the tracer term is the only source of one.
-        return positive(convert(measured)), 0.0, 0.0
+        return point, point, point
 
-    point = positive(convert(measured.point))
     lower, upper = _finite(measured.lower), _finite(measured.upper)
-    low = convert(lower) if lower is not None else None
-    high = convert(upper) if upper is not None else None
-    down = (point - low) / point if low is not None and low > 0 else None
-    up = (high - point) / point if high is not None else None
-    return point, down, up
+    return point, mapped_limit(lower), mapped_limit(upper)
 
 
 def _tracer_sensitivity(
@@ -269,7 +271,10 @@ def ki_from_ic50(
         apply.
 
         Combining the two uncertainties is first order and assumes they are independent,
-        which they are when the tracer constant comes from a separate experiment.
+        which they are when the tracer constant comes from a separate experiment. When
+        a percentile interval excludes its point estimate, the tracer half-width is
+        added directly to its endpoints because quadrature around that estimate is not
+        defined.
     """
     if not math.isfinite(tracer_conc) or tracer_conc < 0:
         raise ValueError(f"tracer_conc must be finite and non-negative, got {tracer_conc!r}")
@@ -290,7 +295,7 @@ def ki_from_ic50(
         _warn_approximate(tracer_conc, kd_point)
 
     convert = _converter(tracer_conc, kd_point, receptor_conc)
-    point, down, up = _map_limits(measured, convert)
+    point, lower, upper = _map_limits(measured, convert)
     tracer_rel = _tracer_sensitivity(
         measured.point if isinstance(measured, Interval) else measured,
         tracer_conc,
@@ -302,30 +307,50 @@ def ki_from_ic50(
         return point
 
     method: Method = measured.method if isinstance(measured, Interval) else "asymptotic"
-    return _combine(point, down, up, tracer_rel, method)
+    return _combine(point, lower, upper, tracer_rel, method)
 
 
 def _combine(
     point: float,
-    down: float | None,
-    up: float | None,
+    lower: float | None,
+    upper: float | None,
     tracer_rel: float,
     method: Method,
 ) -> Interval:
-    """Add the tracer term to each side of the interval in quadrature, keeping asymmetry.
+    """Add the tracer uncertainty while preserving the mapped IC50 endpoints.
 
-    Each side is combined on its own, so a skewed interval stays skewed and a side that
-    was undetermined stays that way. A lower limit pushed to zero or below is returned
-    as undetermined: Ki = 0 would read as infinitely tight binding, which is not what a
-    wide interval means.
+    When the interval brackets its point estimate, the independent uncertainty on each
+    side is combined in quadrature as before. A percentile interval can lie entirely on
+    one side of its point estimate; in that case a signed half-width does not exist, so
+    the tracer half-width is applied directly to the outer endpoints. This conservative
+    fallback widens the interval without reflecting an endpoint across the estimate.
+
+    An undetermined side remains undetermined. A lower limit pushed to zero or below is
+    returned as undetermined: Ki = 0 would read as infinitely tight binding, which is not
+    what a wide interval means.
     """
-    lower: float | None = None
-    upper: float | None = None
-    if down is not None:
-        widened = math.hypot(down, tracer_rel)
-        lower = point * (1.0 - widened) if widened < 1.0 else None
-    if up is not None:
-        upper = point * (1.0 + math.hypot(up, tracer_rel))
+    tracer_width = point * abs(tracer_rel)
+    if not math.isfinite(tracer_width):
+        return Interval(point=point, lower=None, upper=None, method=method)
+    if tracer_width == 0.0:
+        return Interval(point=point, lower=lower, upper=upper, method=method)
+
+    excludes_point = (lower is not None and lower > point) or (upper is not None and upper < point)
+    if excludes_point:
+        if lower is not None:
+            candidate = lower - tracer_width
+            lower = candidate if math.isfinite(candidate) and candidate > 0 else None
+        if upper is not None:
+            candidate = upper + tracer_width
+            upper = candidate if math.isfinite(candidate) else None
+    else:
+        if lower is not None:
+            candidate = point - math.hypot(point - lower, tracer_width)
+            lower = candidate if math.isfinite(candidate) and candidate > 0 else None
+        if upper is not None:
+            candidate = point + math.hypot(upper - point, tracer_width)
+            upper = candidate if math.isfinite(candidate) else None
+
     # `method` describes where the IC50 interval came from; the tracer term is folded into it.
     return Interval(point=point, lower=lower, upper=upper, method=method)
 
