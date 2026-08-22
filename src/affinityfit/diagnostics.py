@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
@@ -152,7 +153,7 @@ def _residual_structure(
     conc: NDArray[np.float64],
     signal: NDArray[np.float64],
     model: Model,
-    params: dict[str, float],
+    params: Mapping[str, float],
     stats_out: list[Statistic] | None = None,
 ) -> list[DiagnosticCode]:
     """Test whether the residuals are systematically arranged along the curve.
@@ -238,7 +239,7 @@ def _no_fit(
     conc: NDArray[np.float64],
     signal: NDArray[np.float64],
     model: Model,
-    params: dict[str, float],
+    params: Mapping[str, float],
     n_estimated: int,
     stats_out: list[Statistic] | None = None,
 ) -> list[DiagnosticCode]:
@@ -280,7 +281,7 @@ def _heteroscedastic(
     conc: NDArray[np.float64],
     signal: NDArray[np.float64],
     model: Model,
-    params: dict[str, float],
+    params: Mapping[str, float],
     stats_out: list[Statistic] | None = None,
 ) -> list[DiagnosticCode]:
     """Test whether the size of the residuals grows with the fitted value.
@@ -326,8 +327,8 @@ def _diagnose_coded(
     conc: NDArray[np.float64],
     signal: NDArray[np.float64],
     model: Model,
-    params: dict[str, float],
-    intervals: dict[str, Interval] | None = None,
+    params: Mapping[str, float],
+    intervals: Mapping[str, Interval] | None = None,
     receptor_conc: float | None = None,
     fixed_names: tuple[str, ...] = (),
     weighted: bool = False,
