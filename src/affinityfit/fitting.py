@@ -90,8 +90,9 @@ class Dataset:
             datasets, sigma must be given for all of them or for none.
 
     Raises:
-        ValueError: If neither signal nor replicates is given, the arrays are
-            inconsistent, fewer than 2 points are given, a concentration is negative,
+        ValueError: If neither signal nor replicates is given, concentration, signal,
+            or sigma is not one-dimensional, the arrays are inconsistent, fewer than
+            2 points are given, a concentration or receptor concentration is negative,
             any value is NaN or infinite, or a sigma is not strictly positive.
     """
 
@@ -104,6 +105,8 @@ class Dataset:
 
     def __post_init__(self) -> None:
         conc = np.asarray(self.conc, dtype=float)
+        if conc.ndim != 1:
+            raise ValueError(f"{self.name}: concentration must be one-dimensional, got shape {conc.shape}.")
         _reject_non_finite(conc, "concentration", self.name)
         if conc.size < 2:
             raise ValueError(f"{self.name}: only {conc.size} data point(s) found.")
@@ -129,17 +132,32 @@ class Dataset:
             object.__setattr__(self, "signal", np.asarray(self.replicates, dtype=float).mean(axis=0))
         else:
             signal = np.asarray(self.signal, dtype=float)
+            if signal.ndim != 1:
+                raise ValueError(f"{self.name}: signal must be one-dimensional, got shape {signal.shape}.")
             if signal.shape != conc.shape:
                 raise ValueError(f"{self.name}: conc and signal have different lengths ({conc.size} vs {signal.size})")
             # Catch non-finite values here, before they reach scipy's internals and raise an error that hides the cause.
             _reject_non_finite(signal, "signal", self.name)
             object.__setattr__(self, "signal", signal)
 
-        if self.receptor_conc is not None and not math.isfinite(self.receptor_conc):
-            raise ValueError(f"{self.name}: receptor_conc is not finite.")
+        if self.receptor_conc is not None:
+            try:
+                receptor_conc = np.asarray(self.receptor_conc, dtype=float)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(f"{self.name}: receptor_conc must be a finite, non-negative number.") from exc
+            if receptor_conc.ndim != 0:
+                raise ValueError(f"{self.name}: receptor_conc must be a scalar, got shape {receptor_conc.shape}.")
+            receptor_value = float(receptor_conc)
+            if not math.isfinite(receptor_value):
+                raise ValueError(f"{self.name}: receptor_conc is not finite.")
+            if receptor_value < 0:
+                raise ValueError(f"{self.name}: receptor_conc must be non-negative, got {receptor_value!r}.")
+            object.__setattr__(self, "receptor_conc", receptor_value)
 
         if self.sigma is not None:
             sigma = np.asarray(self.sigma, dtype=float)
+            if sigma.ndim != 1:
+                raise ValueError(f"{self.name}: sigma must be one-dimensional, got shape {sigma.shape}.")
             if sigma.shape != conc.shape:
                 raise ValueError(f"{self.name}: sigma must have the same shape as conc, got {sigma.shape}")
             _reject_non_finite(sigma, "sigma", self.name)
@@ -168,6 +186,43 @@ class Dataset:
         return 1.0 / self.sigma
 
 
+def _initial_guess(model: Model, dataset: Dataset) -> dict[str, float]:
+    """Validate and normalise one dataset's model-supplied initial guess."""
+    guess = model.initial(dataset.conc, dataset.observed)
+    context = f"Model {model.name!r} initial guess for dataset {dataset.name!r}"
+    if not isinstance(guess, Mapping):
+        raise ValueError(f"{context} must be a mapping keyed by parameter name.")
+
+    missing = [name for name in model.params if name not in guess]
+    extra = [name for name in guess if name not in model.params]
+    if missing or extra:
+        raise ValueError(f"{context} must match model parameters exactly; missing={missing!r}, extra={extra!r}.")
+
+    normalised: dict[str, float] = {}
+    for name in model.params:
+        raw = guess[name]
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{context} has a non-numeric value for parameter {name!r}: {raw!r}.") from exc
+        if not math.isfinite(value):
+            raise ValueError(f"{context} has a non-finite value for parameter {name!r}: {raw!r}.")
+        normalised[name] = value
+    return normalised
+
+
+def _finite_median(values: Sequence[float]) -> float:
+    """Return the median of finite values without overflowing an even midpoint."""
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    lower, upper = ordered[middle - 1], ordered[middle]
+    if lower <= 0.0 <= upper:
+        return (lower + upper) / 2.0
+    return lower + (upper - lower) / 2.0
+
+
 class _ParameterLayout:
     """Parameter bookkeeping: free/shared/fixed slot assignment and the log-scale change of variable.
 
@@ -194,7 +249,7 @@ class _ParameterLayout:
         x0: list[float] = []
         lower: list[float] = []
         upper: list[float] = []
-        guesses = [model.initial(d.conc, d.observed) for d in datasets]
+        guesses = [_initial_guess(model, dataset) for dataset in datasets]
 
         for name in model.params:
             if name in self.fixed:
@@ -202,7 +257,7 @@ class _ParameterLayout:
             values = [g[name] for g in guesses]
             if name in shared:
                 self.slots[name] = [len(x0)]
-                x0.append(float(np.median(values)))
+                x0.append(_finite_median(values))
                 lower.append(model.lower(name))
                 upper.append(model.upper(name))
                 self.slot_param.append(name)
@@ -215,7 +270,10 @@ class _ParameterLayout:
                 self.slot_param.extend([name] * n_sets)
                 self.slot_dataset.extend(d.name for d in datasets)
 
-        self.x0 = np.clip(np.asarray(x0, dtype=float), lower, upper)
+        initial = np.asarray(x0, dtype=float)
+        if not np.all(np.isfinite(initial)):
+            raise ValueError(f"Model {model.name!r} produced a non-finite assembled initial guess.")
+        self.x0 = np.clip(initial, lower, upper)
         self.lower = np.asarray(lower, dtype=float)
         self.upper = np.asarray(upper, dtype=float)
         self.n_slots = len(x0)
@@ -338,6 +396,26 @@ class _Problem:
     def unpack(self, x: NDArray[np.float64], index: int) -> tuple[float, ...]:
         return self.layout.unpack(x, index)
 
+    def _predict(self, x: NDArray[np.float64], index: int) -> NDArray[np.float64]:
+        dataset = self.datasets[index]
+        try:
+            raw = self.model(dataset.conc, *self.unpack(x, index))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{dataset.name}: model {self.model.name!r} must return real numeric values.") from exc
+        if np.iscomplexobj(raw):
+            raise ValueError(f"{dataset.name}: model {self.model.name!r} must return real numeric values.")
+        try:
+            predicted = np.asarray(raw, dtype=float)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{dataset.name}: model {self.model.name!r} must return real numeric values.") from exc
+        if predicted.shape != dataset.conc.shape:
+            raise ValueError(
+                f"{dataset.name}: model {self.model.name!r} returned shape {predicted.shape}; "
+                f"expected {dataset.conc.shape}."
+            )
+        _reject_non_finite(predicted, f"model {self.model.name!r} output", dataset.name)
+        return predicted
+
     def residual(
         self,
         x: NDArray[np.float64],
@@ -347,10 +425,7 @@ class _Problem:
         # With sigma given the residuals are weighted. Without it the weights are 1 and every point counts equally,
         # which assumes the measurement error is the same size everywhere.
         return np.concatenate(
-            [
-                (self.model(d.conc, *self.unpack(x, i)) - obs[i]) * self.point_weights[i]
-                for i, d in enumerate(self.datasets)
-            ]
+            [(self._predict(x, i) - obs[i]) * self.point_weights[i] for i in range(len(self.datasets))]
         )
 
     def solve(
@@ -387,9 +462,14 @@ class _Problem:
                 x[j] = v
             return x
 
+        initial_free = np.clip(self.layout.to_internal(start, free), lower, upper)
+        if not np.all(np.isfinite(initial_free)):
+            raise ValueError(f"Model {self.model.name!r} produced a non-finite optimiser start.")
+        self.residual(build(initial_free), signals)
+
         sol = least_squares(
             lambda values: self.residual(build(values), signals),
-            x0=np.clip(self.layout.to_internal(start, free), lower, upper),
+            x0=initial_free,
             bounds=(lower, upper),
             x_scale="jac",
             max_nfev=20000,
@@ -620,6 +700,22 @@ def _validate(
             raise ValueError(
                 f"Unknown parameter name(s) in {label}: {unknown}. Model {model.name!r} has {list(model.params)}."
             )
+
+    for name, value in fixed_d.items():
+        try:
+            fixed_value = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Fixed value for parameter {name!r} must be a finite number, got {value!r}.") from exc
+        if not math.isfinite(fixed_value):
+            raise ValueError(f"Fixed value for parameter {name!r} must be finite, got {value!r}.")
+        lower, upper = model.lower(name), model.upper(name)
+        if fixed_value < lower or fixed_value > upper:
+            raise ValueError(
+                f"Fixed value for parameter {name!r}={fixed_value!r} is outside model {model.name!r} "
+                f"bounds [{lower!r}, {upper!r}]."
+            )
+        fixed_d[name] = fixed_value
+
     both = [p for p in shared_t if p in fixed_d]
     if both:
         raise ValueError(f"A parameter cannot be both shared and fixed: {both}")
@@ -669,8 +765,9 @@ def fit_global(
         GlobalFitResult
 
     Raises:
-        ValueError: If the datasets or the shared/fixed specification are invalid, or
-            `n_boot` is too small to form a percentile interval.
+        ValueError: If the datasets, model initialisation or output, or shared/fixed
+            specification is invalid, or `n_boot` is too small to form a percentile
+            interval.
         RuntimeError: If the optimisation does not converge.
 
     Note:
@@ -855,19 +952,19 @@ def fit(
         FitResult
 
     Raises:
-        ValueError: If fewer data points than parameters are given.
+        ValueError: If the data, model initialisation or output, or fixed specification
+            is invalid, or fewer data points than estimated parameters are given.
         RuntimeError: If the optimisation does not converge.
     """
-    conc = np.asarray(conc, dtype=float)
-    signal = np.asarray(signal, dtype=float)
+    name = "data"
+    dataset = Dataset(name, conc, signal, receptor_conc, replicates, sigma)
     fixed_d = dict(fixed or {})
     n_estimated = len(model.params) - len(fixed_d)
-    if len(conc) < n_estimated:
-        raise ValueError(f"Only {len(conc)} data point(s) for {n_estimated} estimated parameter(s).")
+    if dataset.conc.size < n_estimated:
+        raise ValueError(f"Only {dataset.conc.size} data point(s) for {n_estimated} estimated parameter(s).")
 
-    name = "data"
     result = fit_global(
-        [Dataset(name, conc, signal, receptor_conc, replicates, sigma)],
+        [dataset],
         model=model,
         fixed=fixed_d,
         unit=unit,

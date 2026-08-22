@@ -30,6 +30,7 @@ Models are callable, so the same object works as a plain function and as the
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
@@ -68,6 +69,10 @@ class Model:
             whether cooperativity can be claimed; the slope of a dose-response curve
             is a shape parameter, so that model declares the exponent and leaves this
             False.
+
+    Raises:
+        ValueError: If parameter names, roles, bounds, callables, or display labels
+            do not form a consistent model definition.
     """
 
     name: str
@@ -83,6 +88,70 @@ class Model:
     receptor: str | None = None
     exponent: str | None = None
     cooperative: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name:
+            raise ValueError("Model name must be a non-empty string.")
+        if not self.params:
+            raise ValueError(f"Model {self.name!r}: params must not be empty.")
+        invalid_params = [param for param in self.params if not isinstance(param, str) or not param]
+        if invalid_params:
+            raise ValueError(f"Model {self.name!r}: parameter names must be non-empty strings, got {invalid_params!r}.")
+        duplicates = list(dict.fromkeys(param for param in self.params if self.params.count(param) > 1))
+        if duplicates:
+            raise ValueError(f"Model {self.name!r}: duplicate parameter names: {duplicates!r}.")
+        if not callable(self.func):
+            raise ValueError(f"Model {self.name!r}: func must be callable.")
+        if not callable(self.initial):
+            raise ValueError(f"Model {self.name!r}: initial must be callable.")
+
+        for role, parameter in (("location", self.location), ("amplitude", self.amplitude)):
+            if not isinstance(parameter, str) or not parameter or parameter not in self.params:
+                raise ValueError(f"Model {self.name!r}: {role} must name a parameter in params, got {parameter!r}.")
+        for role, parameter in (
+            ("baseline", self.baseline),
+            ("receptor", self.receptor),
+            ("exponent", self.exponent),
+        ):
+            if parameter is not None and parameter not in self.params:
+                raise ValueError(f"Model {self.name!r}: {role} refers to unknown parameter {parameter!r}.")
+        if self.cooperative and self.exponent is None:
+            raise ValueError(f"Model {self.name!r}: cooperative=True requires an exponent parameter.")
+
+        if not isinstance(self.bounds, Mapping):
+            raise ValueError(f"Model {self.name!r}: bounds must be a mapping.")
+        missing_bounds = [param for param in self.params if param not in self.bounds]
+        extra_bounds = [param for param in self.bounds if param not in self.params]
+        if missing_bounds or extra_bounds:
+            raise ValueError(
+                f"Model {self.name!r}: bounds must match params exactly; "
+                f"missing={missing_bounds!r}, extra={extra_bounds!r}."
+            )
+        normalised_bounds: dict[str, tuple[float, float]] = {}
+        for param in self.params:
+            try:
+                lower_raw, upper_raw = self.bounds[param]
+                lower, upper = float(lower_raw), float(upper_raw)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"Model {self.name!r}: bounds for parameter {param!r} must contain two numbers."
+                ) from exc
+            if math.isnan(lower) or math.isnan(upper) or lower >= upper:
+                raise ValueError(
+                    f"Model {self.name!r}: bounds for parameter {param!r} must satisfy lower < upper, "
+                    f"got ({lower!r}, {upper!r})."
+                )
+            normalised_bounds[param] = (lower, upper)
+        object.__setattr__(self, "bounds", normalised_bounds)
+
+        if not isinstance(self.display, Mapping):
+            raise ValueError(f"Model {self.name!r}: display must be a mapping.")
+        unknown_labels = [param for param in self.display if param not in self.params]
+        if unknown_labels:
+            raise ValueError(f"Model {self.name!r}: display contains unknown parameters: {unknown_labels!r}.")
+        invalid_labels = [param for param, label in self.display.items() if not isinstance(label, str) or not label]
+        if invalid_labels:
+            raise ValueError(f"Model {self.name!r}: display labels must be non-empty strings for {invalid_labels!r}.")
 
     def __call__(self, conc: NDArray[np.float64] | float, *params: float) -> NDArray[np.float64]:
         """Evaluate the model, so it can be used as a plain function."""
