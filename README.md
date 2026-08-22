@@ -33,7 +33,12 @@ uv add affinityfit
 import numpy as np
 from affinityfit import DiagnosticCode, fit
 
-conc, signal = np.loadtxt("titration.csv", delimiter=",", skiprows=1, unpack=True)
+conc, signal = np.genfromtxt(
+    "titration.csv",
+    delimiter=",",
+    skip_header=1,
+    unpack=True,
+)
 res = fit(conc, signal, unit="nM")
 
 print(res.params["kd"], res.intervals["kd"].format("nM"))
@@ -62,15 +67,19 @@ Each member is a plain string (`DiagnosticCode.NOT_SATURATED == "not_saturated"`
 comparing `diagnostic.code` against either the enum member or the equivalent string
 literal works the same way.
 
-The input CSV has concentration in the first column and signal in the second. Header
-rows, comment rows, and blank rows are skipped. Repeated rows at the same concentration
-are kept as separate data points rather than averaged; passing them to the bootstrap as
-replicates requires the separate `replicates` argument described below.
+The minimal CSV format places one header row on the first physical line, with
+concentration in the first column and signal in the second. `np.genfromtxt` skips that
+header and any subsequent comment or blank rows. Repeated rows at the same concentration
+remain separate data points; passing them to the bootstrap as replicates requires the
+separate `replicates` argument described below.
 
-Missing values (blank cells), `nan`, and `inf` raise an error naming the line, as do a
-negative concentration and a file with fewer than three numeric rows. Silently dropping
-a blank row would change the number of points, and with it the degrees of freedom and
-the diagnostics.
+The commented CSV files in `examples/` place comments before the header. In a source
+checkout, `examples/plot_fit.py` provides `read_csv()` for that format.
+
+An empty delimited cell, `nan`, or `inf` is loaded as a non-finite value, and
+`fit()` raises an error naming its array index. A row with fewer or more than two fields
+is rejected by `np.genfromtxt` during parsing. A negative concentration also raises an
+error, and the default three-parameter fit requires at least three numeric rows.
 
 ```csv
 concentration_nM,signal
@@ -92,8 +101,8 @@ interval : profile
 Kd       = 10.1 +/- 0.8 nM
 Bmax     = 0.995 +/- 0.017
 baseline = 0.018 +/- 0.014
-R^2      = 0.9998   (n = 8)
-AICc     = -71.12   (AIC = -77.12)
+AICc     = -63.79   (AIC = -77.12)
+R^2      = 0.9998   (n = 8; descriptive only)
 
 No diagnostic issues detected.
 ```
@@ -183,8 +192,8 @@ The diagnostics warn when the size of the residuals grows with the fitted value.
 
 | Method | Description |
 |---|---|
-| `profile` (default) | Pins *K*<sub>d</sub> and refits everything else, taking the boundary where the residual sum of squares rises significantly (an F-test). The interval can be asymmetric, and a side that cannot be determined is returned as `None` rather than as a number, and formatted as a one-sided limit |
-| `asymptotic` | Reads the interval off the curvature of the covariance matrix. The fastest option, but reports a finite two-sided interval even for unidentifiable data |
+| `profile` (default) | Pins each estimated parameter in turn and refits the others, taking the boundary where the residual sum of squares rises significantly (an F-test). The interval can be asymmetric, and a side that cannot be determined is returned as `None` rather than as a number, and formatted as a one-sided limit |
+| `asymptotic` | Reads the interval from the curvature of the covariance matrix. The fastest option, but returns an undetermined interval when there is no residual degree of freedom, the Jacobian is rank-deficient, or a finite width cannot be calculated |
 | `bootstrap` | Resamples the data and refits to get the distribution of the estimate directly. Resamples replicates when given, residuals otherwise |
 
 `replicates` has shape `(n_replicates, n_points)`.
@@ -272,31 +281,41 @@ neither depletes the tracer nor takes up an appreciable share of the competitor.
 that fails the form is biased, and the bias does not decay for a weak competitor: it
 settles at an offset set by how much tracer the receptor holds. Measured for a receptor
 at 6.5 times the tracer constant, the approximation came out 96% high at
-*K*<sub>i</sub> = 0.05 and 9% low at *K*<sub>i</sub> = 100, in the same units. Choosing a
-different tracer concentration to plug in does not fix it: the exact denominator falls
+*K*<sub>i</sub> = 0.05 and 9% low at *K*<sub>i</sub> = 100, in the same units.
+Choosing a different tracer concentration to plug in does not fix it: the exact denominator falls
 between the ones the total and the free tracer concentration give. With `receptor_conc`
 the exact correction is used instead, which agrees with the Munson–Rodbard result.
 `fit(..., receptor_conc=...)` is carried on the `FitResult`, so passing the result is
 enough. Without it, a `UserWarning` reports that the bias could not be assessed.
 
 **The standard form assumes a slope of 1.** It is derived for a single site under
-competition, and a fitted slope whose interval excludes 1 indicates that the derivation
-does not apply. The modified forms that cover a slope away from 1 raise the terms to
-powers and [do not agree with one another](https://pubmed.ncbi.nlm.nih.gov/12481843/),
+competition. A bounded, non-zero-width fitted-slope interval that excludes 1 indicates
+that the derivation does not apply. The modified forms that cover a slope away from 1
+raise the terms to powers and
+[do not agree with one another](https://pubmed.ncbi.nlm.nih.gov/12481843/),
 so the choice between them is left to the caller; the library reports the violation
-rather than applying one silently. Ligand depletion steepens a displacement curve, so it
-is the first cause to rule out before adopting a modified form. Only the `FitResult`
-carries the IC<sub>50</sub> and the slope together, so only that overload can check it.
-Passing `res.intervals["ic50"]` computes the same number without the check.
+rather than applying one silently. Ligand depletion steepens a displacement curve, so
+it is the first cause to rule out before adopting a modified form. Only the `FitResult`
+carries the IC<sub>50</sub>, slope, and receptor concentration together, so only that
+overload can check the slope and inherit `receptor_conc`. Passing
+`res.intervals["ic50"]` skips the slope check and uses the standard approximation unless
+`receptor_conc` is passed explicitly.
 
-**The tracer constant's own error usually dominates.** With `r = [T]/Kd*`, the relative
-error of `Kd*` propagates to *K*<sub>i</sub> damped by `r/(1+r)`, so at `[T] = 2.5·Kd*`
-a 20% uncertainty on `Kd*` puts 14% onto *K*<sub>i</sub>, against about 5% from a
-well-measured IC<sub>50</sub>. Treating `Kd*` as exact here reports ±5% where the
-experiment supports ±15%. The two are independent, so they combine in quadrature, each
-side of the interval separately; asymmetry is preserved, an undetermined limit stays
-undetermined, and a lower limit driven past zero is reported as undetermined rather than
-as a *K*<sub>i</sub> of zero. `tracer_conc` and `receptor_conc` are taken as exact.
+**The tracer constant's own error can dominate.** Under the standard Cheng–Prusoff
+form, with `r = [T]/Kd*`, the relative error of `Kd*` propagates to *K*<sub>i</sub>
+damped by `r/(1+r)`. At `[T] = 2.5·Kd*`, a 20% uncertainty on `Kd*` therefore puts
+14% onto *K*<sub>i</sub>, against about 5% from a well-measured IC<sub>50</sub>.
+Treating `Kd*` as exact here reports ±5% where the experiment supports ±15%. The exact
+correction instead evaluates the sensitivity to `Kd*` through the depleted-tracer
+relation.
+
+When the mapped IC<sub>50</sub> interval brackets its point estimate, the two
+independent uncertainties combine in quadrature on each side. A percentile interval
+that excludes its point estimate is widened directly at its outer endpoints instead.
+In either case, asymmetry is preserved, an undetermined limit stays undetermined, and a
+lower limit driven past zero is reported as undetermined rather than as a
+*K*<sub>i</sub> of zero.
+`tracer_conc` and `receptor_conc` are taken as exact.
 
 For competitive enzyme inhibition the same expression applies with `[S]` and `Km`.
 
@@ -310,10 +329,11 @@ equals the total one. This assumption fails once the receptor is not much more d
 than *K*<sub>d</sub>, because each molecule bound is one fewer left in solution. The
 curve still looks like a saturation curve, and *R*<sup>2</sup> alone does not reveal the
 problem. On noiseless 1:1 data with the receptor at five times *K*<sub>d</sub> (15
-concentrations spanning 10<sup>−2</sup> to 10<sup>2</sup> times *K*<sub>d</sub> plus a
-blank, baseline held at 0), `langmuir` reports *K*<sub>d</sub> = 3.99 against a true
-1.0, at *R*<sup>2</sup> = 0.9919; `RESIDUAL_STRUCTURE` and `HETEROSCEDASTIC` are raised
-on the same fit and point at the mismatch that *R*<sup>2</sup> alone misses.
+points: 14 positive concentrations spanning 10<sup>−2</sup> to 10<sup>2</sup> times
+*K*<sub>d</sub> and a blank, baseline held at 0), `langmuir` reports
+*K*<sub>d</sub> = 3.99 against a true 1.0, at *R*<sup>2</sup> = 0.9919;
+`RESIDUAL_STRUCTURE` and `HETEROSCEDASTIC` are raised on the same fit and point at the
+mismatch that *R*<sup>2</sup> alone misses.
 
 `tight_binding` solves the 1:1 equilibrium without that assumption. Pass the total
 receptor concentration as `rt`, normally as a constant.
@@ -348,20 +368,23 @@ use. Two limitations apply:
 
 Depletion does not only shift the curve, it steepens it, and `hill` reads that steepness
 as an exponent. The same data as above, with no cooperativity anywhere in the system,
-fits `hill` at *n* = 1.43 [1.32, 1.54]. `hill` reduces to `langmuir` exactly at *n* = 1,
-so its *R*<sup>2</sup> is higher by construction and cannot itself argue for
-cooperativity; the interval on *n* excluding 1 is what does. The check described above
-(`intervals["n"].contains(1.0)`) accordingly reports cooperativity that does not exist.
+fits `hill` at *n* = 1.43 [1.32, 1.54]. `hill` reduces to `langmuir` exactly at
+*n* = 1, so under unweighted least squares its *R*<sup>2</sup> cannot be lower and does
+not itself argue for cooperativity. The displayed unweighted *R*<sup>2</sup> does not
+have this guarantee when `sigma` is supplied. The interval on *n* excluding 1 is the
+relevant check, and `intervals["n"].contains(1.0)` accordingly reports cooperativity
+that does not exist.
 
 No model here solves depletion and cooperativity at once. Adding one would impose an
 exact conservation law on the Hill equation, which is phenomenological to begin with.
 Cooperativity must therefore be measured where depletion is absent: keep the receptor at
 or below *K*<sub>d</sub>/10 for that question.
 
-An *n* significantly above 1 is always reported together with the alternatives that
-produce the same shape (depletion, self-association, or a reading taken before
-equilibrium). Passing `receptor_conc=` allows the first of them to be checked rather
-than only listed; without it, the warning states that the check could not be performed.
+`HILL_N_ABOVE_ONE` reports an *n* significantly above 1 together with the
+alternatives that produce the same shape: depletion, self-association, and a reading
+taken before equilibrium. Its message does not change with `receptor_conc`. Supplying
+`receptor_conc` enables the separate `LIGAND_DEPLETION` check, which is emitted when the
+receptor concentration exceeds *K*<sub>d</sub>/10.
 
 ## Model selection
 
@@ -369,11 +392,32 @@ Use `aicc` (the corrected Akaike information criterion) to compare models or
 parameter-sharing schemes. `aic` is kept for reference, but the uncorrected AIC is only
 asymptotically valid and favours the model with more parameters at the scale of a
 typical titration (6–15 points, 3–6 fitted coefficients, *n*/*k* of 2–5 once the
-residual-variance parameter below is counted).
+residual-variance parameter below is counted). Lower AICc is preferred; the ordering is
+determined by the data rather than by the model name or sharing scheme.
 
 ```python
-shared.aicc < free.aicc
-fit_global(ds, model=hill).aicc < fit_global(ds, model=langmuir).aicc
+import numpy as np
+from affinityfit import Dataset, fit_global, hill, langmuir
+
+conc = np.concatenate(([0.0], np.logspace(-1, 2, 11)))
+rng = np.random.default_rng(7)
+
+
+def simulate(kd):
+    clean = langmuir(conc, kd, 1.0, 0.02)
+    return clean + rng.normal(0.0, 0.01, conc.size)
+
+
+datasets = [
+    Dataset("sample_a", conc, simulate(3.0)),
+    Dataset("sample_b", conc, simulate(30.0)),
+]
+free_langmuir = fit_global(datasets, model=langmuir)
+shared_langmuir = fit_global(datasets, model=langmuir, shared=["bmax"])
+free_hill = fit_global(datasets, model=hill)
+
+print({"free": free_langmuir.aicc, "shared": shared_langmuir.aicc})
+print({"langmuir": free_langmuir.aicc, "hill": free_hill.aicc})
 ```
 
 `report()` shows AICc first, with AIC in parentheses for reference. Least squares also
@@ -397,10 +441,10 @@ measurements are placed well.
 | Condition | Meaning | Code |
 |---|---|---|
 | Amplitude within 1% of the signal range | The fit is effectively a flat line; the model cannot express the shape of the data | `AMPLITUDE_COLLAPSED` |
-| Fitted model not distinguishable from its own mean (F-test against a constant, *P* < 0.01) | The model does not capture the trend in the data; the value of *K*<sub>d</sub> is meaningless | `NO_FIT` |
+| Fitted model not distinguishable from its own mean (F-test against a constant, *P* ≥ 0.01) | The model does not capture the trend in the data; the value of *K*<sub>d</sub> is meaningless | `NO_FIT` |
 | Systematic sign in the residuals | The shape of the model does not match the mechanism, even with a high coefficient of determination. Needs at least eight points | `RESIDUAL_STRUCTURE` |
 | A parameter stuck at a bound | That value is an artefact of the constraint, not an estimate, and cannot be reported | `PARAM_AT_BOUND` |
-| Highest concentration < 3 × *K*<sub>d</sub> | Saturation not reached; *K*<sub>d</sub> and *B*<sub>max</sub> cannot be mathematically separated, so the conclusion is limited to "*K*<sub>d</sub> > highest concentration" | `NOT_SATURATED` |
+| Highest concentration < 3 × *K*<sub>d</sub> | Saturation was not reached; the fitted location and amplitude may not be identifiable separately. Extend the measured range before interpreting either value | `NOT_SATURATED` |
 | Highest concentration < 10 × *K*<sub>d</sub> | The estimate of *B*<sub>max</sub> is unstable, and the confidence interval on *K*<sub>d</sub> widens as well | `WEAKLY_SATURATED` |
 | Data points < 2 × estimated parameters | Not enough information; confidence intervals are indicative only (fixed parameters are not counted) | `FEW_POINTS` |
 | Fewer than two points near *K*<sub>d</sub> (*K*<sub>d</sub>/3 to 3 × *K*<sub>d</sub>) | The inflection point of the curve is underdetermined; adding points here improves the estimate the most | `NO_POINTS_NEAR_KD` |
@@ -409,10 +453,10 @@ measurements are placed well.
 | Receptor concentration > *K*<sub>d</sub>/10 | Ligand depletion causes *K*<sub>d</sub> to be overestimated; switch to `tight_binding`. Not reported when that model is already in use. With `hill`, also states that *n* is inflated and cooperativity cannot be judged at all under these conditions | `LIGAND_DEPLETION` |
 | The confidence interval of the Hill coefficient *n* is undetermined | The residuals leave no scatter from which to determine a direction, or a side is undetermined; cooperativity cannot be judged | `HILL_N_UNDETERMINED` |
 | The confidence interval of the Hill coefficient *n* contains 1 | Cooperativity cannot be claimed | `HILL_N_INCLUDES_ONE` |
-| Hill coefficient *n* significantly > 1 | Positive cooperativity is one reading, but depletion, self-association, and a pre-equilibrium reading give the same shape. States when `receptor_conc` was not supplied to check the first of them | `HILL_N_ABOVE_ONE` |
+| Hill coefficient *n* significantly > 1 | Positive cooperativity is one reading, but depletion, self-association, and a pre-equilibrium reading give the same shape | `HILL_N_ABOVE_ONE` |
 | Hill coefficient *n* significantly < 1 | Negative cooperativity, heterogeneous sites, or a heterogeneous sample | `HILL_N_BELOW_ONE` |
-| Residual size proportional to the fitted value | Heteroscedastic error; omitting `sigma` narrows the interval. Needs at least eight points, and is not checked once `sigma` is supplied | `HETEROSCEDASTIC` |
-| Zero degrees of freedom (points ≤ parameters) | The curve passes through every point by construction; no confidence interval can be computed | `NO_DEGREES_OF_FREEDOM` |
+| Positive rank association between absolute residuals and fitted values (one-sided Spearman test, *P* < 0.01) | Heteroscedastic error; omitting `sigma` narrows the interval. Needs at least eight points, and is not checked once `sigma` is supplied | `HETEROSCEDASTIC` |
+| Zero degrees of freedom (points ≤ parameters) | No residual variance is available to estimate uncertainty; no confidence interval can be calculated | `NO_DEGREES_OF_FREEDOM` |
 | Rank-deficient Jacobian | Parameters cannot be distinguished, so the values are not uniquely determined; more concentrations are needed | `RANK_DEFICIENT_JACOBIAN` |
 | One side of a confidence interval is undetermined | The point estimate should not be reported; sharing or a wider measured range is needed. The Hill coefficient is excluded, the `HILL_N_*` codes covering it instead | `LIMIT_UNDETERMINED` |
 | Too many bootstrap resamples failed to converge | Below the minimum for a percentile interval; the interval is reported as undetermined | `BOOTSTRAP_INSUFFICIENT_SAMPLES` |
@@ -423,11 +467,12 @@ measurements are placed well.
 `ki_from_ic50` raises a `UserWarning` rather than a diagnostic, since it is called
 after the fit and has no `FitResult` of its own to attach one to.
 
-In a global fit, findings whose premise is removed by sharing or fixing are suppressed.
-If `bmax` is shared, for example, `NOT_SATURATED` no longer applies and
-`SHARED_AMPLITUDE_IDENTIFIES_LOCATION` is emitted in its place. That note is withheld
-when the fit itself is broken (`NO_FIT` or `AMPLITUDE_COLLAPSED`), since it would
-otherwise contradict the other findings.
+In a global fit, sharing the amplitude suppresses `NOT_SATURATED` and
+`WEAKLY_SATURATED`, because the plateau is constrained across datasets. An unsaturated
+dataset receives `SHARED_AMPLITUDE_IDENTIFIES_LOCATION` instead. Fixing the baseline
+suppresses `NO_LOW_CONC`. The shared-amplitude note is withheld when the fit itself is
+broken (`NO_FIT` or `AMPLITUDE_COLLAPSED`), since it would otherwise contradict the
+other findings.
 
 In `examples/titration_unsaturated.csv`, *R*<sup>2</sup> = 0.9936 suggests a good fit,
 but the highest concentration is only a third of *K*<sub>d</sub>, so the upper limit is
@@ -444,9 +489,14 @@ titrations fitted with the correct model, the false-positive rate was 1.1%.
 
 ### Statistics
 
-The warnings are judged at a fixed significance level. Stacking tests across several
-datasets raises the false-positive rate accordingly, so the underlying statistic and *P*
-value are returned as-is.
+The thresholded statistical checks do not share one criterion. `model_vs_constant` and
+`heteroscedasticity` use 0.01, while `residual_runs` uses 0.025. When every non-zero
+residual has the same sign, `residual_sign_test` records the exact two-sided *P* value,
+and `RESIDUAL_STRUCTURE` is emitted without comparing it with a threshold.
+`residual_autocorrelation` is compared with a fixed correlation threshold of 0.3 rather
+than a *P* value. Stacking tests across several datasets raises the false-positive rate,
+so the underlying statistics and *P* values are returned for a caller-selected
+multiple-comparison correction.
 
 ```python
 res = fit(conc, signal)
@@ -455,11 +505,11 @@ for s in res.statistics:
 ```
 
 For several datasets, these are available per dataset through
-`GlobalFitResult.statistics_per["dataset name"]`. The names are `residual_runs`,
-`residual_autocorrelation`, and `heteroscedasticity`, plus `residual_sign_test`,
-which stands in for `residual_runs` when every residual shares a sign and the runs count
-is degenerate. `residual_autocorrelation` is judged against a fixed threshold rather
-than a *P* value, so its `p_value` is `None`.
+`GlobalFitResult.statistics_per["dataset name"]`. The names are
+`model_vs_constant`, `residual_runs`, `residual_autocorrelation`, and
+`heteroscedasticity`, plus `residual_sign_test`, which stands in for
+`residual_runs` when every residual shares a sign and the runs count is degenerate.
+`residual_autocorrelation` has no *P* value, so its `p_value` is `None`.
 
 ## Plotting
 
@@ -484,9 +534,11 @@ measurements being skewed toward saturation.
 
 `examples/plot_fit.py` is a sample that draws the measured points, the fitted
 curve, and a residual panel in a single figure. It is not part of the distribution.
+Run it from a source checkout with the development dependencies installed; Matplotlib
+is not installed with the library runtime dependencies.
 
 ```bash
-uv run python examples/plot_fit.py examples/titration_good.csv --unit nM
+uv run python examples/plot_fit.py examples/titration_good.csv --unit nM --out examples/fit_good.png
 ```
 
 Running this sample on `examples/titration_good.csv`:
