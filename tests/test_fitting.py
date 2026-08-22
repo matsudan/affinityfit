@@ -8,15 +8,24 @@ Kd (0.2-1.6 mM against Kd = 9.0 mM, or 0.18 times Kd), which is what makes shari
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
+from dataclasses import replace
+from typing import cast
+
 import numpy as np
 import pytest
 
-from affinityfit import Dataset, fit_global, langmuir
+from affinityfit import Dataset, diagnose, fit_global, langmuir
 
 # Measured range for a two-state titration where one form saturates and the other does not.
 L_TWO_STATE = np.array([0.2, 0.32, 0.5, 0.8, 1.1, 1.6])
 KD_OX, KD_RED, IMAX = 1.1, 9.0, 1.0
 PROTEIN_MM = 8.4e-3  # 8.4 uM
+
+
+def _assert_read_only[K, V](mapping: Mapping[K, V], key: K, value: V) -> None:
+    with pytest.raises(TypeError):
+        cast(MutableMapping[K, V], mapping)[key] = value
 
 
 def iqr(values):
@@ -202,6 +211,194 @@ def test_aicc_reaches_the_per_dataset_result():
 
 
 # --------------------------------------------------------------- API and validation
+
+
+def test_fit_result_mappings_are_copied_read_only_and_refrozen_by_replace():
+    base = fit_global(
+        two_state_datasets(noise=0.02, seed=5),
+        shared=["bmax"],
+        fixed={"baseline": 0.0},
+        ci="asymptotic",
+    ).result_for("oxidized")
+    params = dict(base.params)
+    intervals = dict(base.intervals)
+    fixed = dict(base.fixed)
+    expected_params = dict(params)
+    expected_intervals = dict(intervals)
+    expected_fixed = dict(fixed)
+
+    result = replace(base, params=params, intervals=intervals, fixed=fixed)
+    params.clear()
+    intervals.clear()
+    fixed.clear()
+
+    assert result.params == expected_params
+    assert result.intervals == expected_intervals
+    assert result.fixed == expected_fixed
+    _assert_read_only(result.params, "kd", result.params["kd"])
+    _assert_read_only(result.intervals, "kd", result.intervals["kd"])
+    _assert_read_only(result.fixed, "baseline", result.fixed["baseline"])
+
+    replaced = replace(result)
+    assert replaced.params is not result.params
+    assert replaced.intervals is not result.intervals
+    assert replaced.fixed is not result.fixed
+    _assert_read_only(replaced.params, "kd", replaced.params["kd"])
+    _assert_read_only(replaced.intervals, "kd", replaced.intervals["kd"])
+    _assert_read_only(replaced.fixed, "baseline", replaced.fixed["baseline"])
+
+
+def test_global_result_copies_and_freezes_every_mapping():
+    base = fit_global(
+        two_state_datasets(noise=0.02, seed=5),
+        shared=["bmax"],
+        fixed={"baseline": 0.0},
+        ci="asymptotic",
+    )
+    order = tuple(reversed(base.names))
+    params = {name: dict(base.params[name]) for name in order}
+    intervals = {name: dict(base.intervals[name]) for name in order}
+    fixed = dict(base.fixed)
+    r_squared_per = {name: base.r_squared_per[name] for name in order}
+    n_points_per = {name: base.n_points_per[name] for name in order}
+    diagnostics_per = {name: base.diagnostics_per[name] for name in order}
+    statistics_per = {name: base.statistics_per[name] for name in order}
+    receptor_conc_per = {name: base.receptor_conc_per[name] for name in order}
+    expected_params = {name: dict(values) for name, values in params.items()}
+    expected_intervals = {name: dict(values) for name, values in intervals.items()}
+    expected_fixed = dict(fixed)
+    expected_r_squared_per = dict(r_squared_per)
+    expected_n_points_per = dict(n_points_per)
+    expected_diagnostics_per = dict(diagnostics_per)
+    expected_statistics_per = dict(statistics_per)
+    expected_receptor_conc_per = dict(receptor_conc_per)
+
+    result = replace(
+        base,
+        params=params,
+        intervals=intervals,
+        fixed=fixed,
+        r_squared_per=r_squared_per,
+        n_points_per=n_points_per,
+        diagnostics_per=diagnostics_per,
+        statistics_per=statistics_per,
+        receptor_conc_per=receptor_conc_per,
+    )
+    params[order[0]]["kd"] = -1.0
+    intervals[order[0]]["kd"] = intervals[order[0]]["bmax"]
+    for source in (
+        params,
+        intervals,
+        fixed,
+        r_squared_per,
+        n_points_per,
+        diagnostics_per,
+        statistics_per,
+        receptor_conc_per,
+    ):
+        source.clear()
+
+    assert result.params == expected_params
+    assert expected_params == result.params
+    assert result.intervals == expected_intervals
+    assert result.fixed == expected_fixed
+    assert result.r_squared_per == expected_r_squared_per
+    assert result.n_points_per == expected_n_points_per
+    assert result.diagnostics_per == expected_diagnostics_per
+    assert result.statistics_per == expected_statistics_per
+    assert result.receptor_conc_per == expected_receptor_conc_per
+    assert result.names == order
+    assert result.intervals["oxidized"]["bmax"] is result.intervals["reduced"]["bmax"]
+
+    name = order[0]
+    _assert_read_only(result.params, name, result.params[name])
+    _assert_read_only(result.params[name], "kd", result.params[name]["kd"])
+    _assert_read_only(result.intervals, name, result.intervals[name])
+    _assert_read_only(result.intervals[name], "kd", result.intervals[name]["kd"])
+    _assert_read_only(result.fixed, "baseline", result.fixed["baseline"])
+    _assert_read_only(result.r_squared_per, name, result.r_squared_per[name])
+    _assert_read_only(result.n_points_per, name, result.n_points_per[name])
+    _assert_read_only(result.diagnostics_per, name, result.diagnostics_per[name])
+    _assert_read_only(result.statistics_per, name, result.statistics_per[name])
+    _assert_read_only(result.receptor_conc_per, name, result.receptor_conc_per[name])
+
+    replaced = replace(result)
+    for field_name in (
+        "params",
+        "intervals",
+        "fixed",
+        "r_squared_per",
+        "n_points_per",
+        "diagnostics_per",
+        "statistics_per",
+        "receptor_conc_per",
+    ):
+        assert getattr(replaced, field_name) is not getattr(result, field_name)
+    assert replaced.params[name] is not result.params[name]
+    assert replaced.intervals[name] is not result.intervals[name]
+    _assert_read_only(replaced.params[name], "kd", replaced.params[name]["kd"])
+    _assert_read_only(replaced.r_squared_per, name, replaced.r_squared_per[name])
+
+
+def test_result_mappings_compose_with_public_diagnose():
+    dataset = two_state_datasets(noise=0.02, seed=5)[0]
+    result = fit_global([dataset], fixed={"baseline": 0.0}, ci="asymptotic").result_for(dataset.name)
+
+    diagnostics = diagnose(
+        dataset.conc,
+        dataset.observed,
+        result.model,
+        result.params,
+        result.intervals,
+        dataset.receptor_conc,
+        tuple(result.fixed),
+    )
+
+    assert isinstance(diagnostics, tuple)
+
+
+def test_result_for_mappings_are_read_only_and_independent():
+    result = fit_global(
+        two_state_datasets(noise=0.02, seed=5),
+        shared=["bmax"],
+        fixed={"baseline": 0.0},
+        ci="asymptotic",
+    )
+    sub = result.result_for("oxidized")
+
+    assert sub.params == result.params["oxidized"]
+    assert sub.intervals == result.intervals["oxidized"]
+    assert sub.fixed == result.fixed
+    assert sub.params is not result.params["oxidized"]
+    assert sub.intervals is not result.intervals["oxidized"]
+    assert sub.fixed is not result.fixed
+    _assert_read_only(sub.params, "kd", sub.params["kd"])
+    _assert_read_only(sub.intervals, "kd", sub.intervals["kd"])
+    _assert_read_only(sub.fixed, "baseline", sub.fixed["baseline"])
+
+
+def test_detached_result_mapping_snapshots_remain_editable():
+    result = fit_global(
+        two_state_datasets(noise=0.02, seed=5),
+        shared=["bmax"],
+        fixed={"baseline": 0.0},
+        ci="asymptotic",
+    )
+    sub = result.result_for("oxidized")
+    ci95 = sub.ci95
+    expected_ci95 = dict(ci95)
+    warnings_per = result.warnings_per
+    expected_warnings_per = dict(warnings_per)
+    notes_per = result.notes_per
+    expected_notes_per = dict(notes_per)
+
+    ci95.clear()
+    warnings_per.clear()
+    notes_per.clear()
+
+    assert sub.ci95 == expected_ci95
+    assert result.warnings_per == expected_warnings_per
+    assert result.notes_per == expected_notes_per
 
 
 def test_result_for_returns_usable_fitresult():

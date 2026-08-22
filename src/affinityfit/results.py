@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Literal
 
 import numpy as np
@@ -13,18 +15,30 @@ from affinityfit.models import Model
 from affinityfit.uncertainty import Interval, Method
 
 
+def _freeze_mapping[K, V](mapping: Mapping[K, V]) -> Mapping[K, V]:
+    return MappingProxyType(dict(mapping))
+
+
+def _freeze_nested_mapping[K, InnerK, V](
+    mapping: Mapping[K, Mapping[InnerK, V]],
+) -> Mapping[K, Mapping[InnerK, V]]:
+    return _freeze_mapping({key: _freeze_mapping(inner) for key, inner in mapping.items()})
+
+
 @dataclass(frozen=True)
 class FitResult:
     """Fitted parameters together with diagnostic messages.
 
     Attributes:
         model: The model that was fitted.
-        params: `{parameter name: value}`.
-        intervals: `{parameter name: Interval}`. Intervals may be asymmetric, and
-            one side may be None when that limit could not be determined.
+        params: Read-only mapping of parameter names to values.
+        intervals: Read-only mapping of parameter names to `Interval` objects.
+            Intervals may be asymmetric, and one side may be None when that limit
+            could not be determined.
         r_squared: Coefficient of determination.
         n_points: Number of data points.
-        fixed: Names and values of the parameters that were held constant.
+        fixed: Read-only mapping of names to values for parameters that were held
+            constant.
         method: Which interval method produced `intervals`.
         aic: Akaike information criterion of the fit this came from. Present for
             reference; prefer `aicc`.
@@ -44,11 +58,11 @@ class FitResult:
     """
 
     model: Model
-    params: dict[str, float]
-    intervals: dict[str, Interval]
+    params: Mapping[str, float]
+    intervals: Mapping[str, Interval]
     r_squared: float
     n_points: int
-    fixed: dict[str, float] = field(default_factory=dict)
+    fixed: Mapping[str, float] = field(default_factory=dict)
     method: str = "profile"
     aic: float = float("nan")
     aicc: float = float("nan")
@@ -56,6 +70,11 @@ class FitResult:
     diagnostics: tuple[Diagnostic, ...] = field(default_factory=tuple)
     statistics: tuple[Statistic, ...] = field(default_factory=tuple)
     receptor_conc: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "params", _freeze_mapping(self.params))
+        object.__setattr__(self, "intervals", _freeze_mapping(self.intervals))
+        object.__setattr__(self, "fixed", _freeze_mapping(self.fixed))
 
     @property
     def ci95(self) -> dict[str, float]:
@@ -159,6 +178,8 @@ class FitResult:
 class GlobalFitResult:
     """Result of a fit over several datasets.
 
+    All mapping attributes are copied during construction and are read-only.
+
     Attributes:
         model: The model that was fitted.
         params: `{dataset name: {parameter name: value}}`.
@@ -191,23 +212,33 @@ class GlobalFitResult:
     """
 
     model: Model
-    params: dict[str, dict[str, float]]
-    intervals: dict[str, dict[str, Interval]]
+    params: Mapping[str, Mapping[str, float]]
+    intervals: Mapping[str, Mapping[str, Interval]]
     shared: tuple[str, ...]
-    fixed: dict[str, float]
+    fixed: Mapping[str, float]
     method: Method
     r_squared: float
-    r_squared_per: dict[str, float]
+    r_squared_per: Mapping[str, float]
     n_points: int
-    n_points_per: dict[str, int]
+    n_points_per: Mapping[str, int]
     n_free_params: int
     aic: float
     aicc: float
     unit: str = ""
     fit_diagnostics: tuple[Diagnostic, ...] = field(default_factory=tuple)
-    diagnostics_per: dict[str, tuple[Diagnostic, ...]] = field(default_factory=dict)
-    statistics_per: dict[str, tuple[Statistic, ...]] = field(default_factory=dict)
-    receptor_conc_per: dict[str, float | None] = field(default_factory=dict)
+    diagnostics_per: Mapping[str, tuple[Diagnostic, ...]] = field(default_factory=dict)
+    statistics_per: Mapping[str, tuple[Statistic, ...]] = field(default_factory=dict)
+    receptor_conc_per: Mapping[str, float | None] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "params", _freeze_nested_mapping(self.params))
+        object.__setattr__(self, "intervals", _freeze_nested_mapping(self.intervals))
+        object.__setattr__(self, "fixed", _freeze_mapping(self.fixed))
+        object.__setattr__(self, "r_squared_per", _freeze_mapping(self.r_squared_per))
+        object.__setattr__(self, "n_points_per", _freeze_mapping(self.n_points_per))
+        object.__setattr__(self, "diagnostics_per", _freeze_mapping(self.diagnostics_per))
+        object.__setattr__(self, "statistics_per", _freeze_mapping(self.statistics_per))
+        object.__setattr__(self, "receptor_conc_per", _freeze_mapping(self.receptor_conc_per))
 
     @property
     def names(self) -> tuple[str, ...]:

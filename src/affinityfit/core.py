@@ -8,6 +8,7 @@ coded checks, and `FitResult`.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal
 
 import numpy as np
@@ -115,8 +116,8 @@ def diagnose(
     conc: NDArray[np.float64],
     signal: NDArray[np.float64],
     model: Model,
-    params: dict[str, float],
-    intervals: dict[str, Interval] | None = None,
+    params: Mapping[str, float],
+    intervals: Mapping[str, Interval] | None = None,
     receptor_conc: float | None = None,
     fixed_names: tuple[str, ...] = (),
     weighted: bool = False,
