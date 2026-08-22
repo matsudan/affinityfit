@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.0](https://github.com/matsudan/affinityfit/compare/v0.4.0...v0.5.0) (2026-08-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* `FitResult` and `GlobalFitResult` mapping fields now reject mutation and are annotated as `Mapping` rather than `dict`. Make an explicit `dict(...)` copy before editing.
+
+### Bug Fixes
+
+* include fit-wide diagnostics in scoped views ([bce3cc1](https://github.com/matsudan/affinityfit/commit/bce3cc1f4b26a337da858cef2e06a114dcfa13e7))
+* include fit-wide diagnostics in scoped views ([#35](https://github.com/matsudan/affinityfit/issues/35)) ([bce3cc1](https://github.com/matsudan/affinityfit/commit/bce3cc1f4b26a337da858cef2e06a114dcfa13e7))
+* make fitted-result mappings read-only ([#40](https://github.com/matsudan/affinityfit/issues/40)) ([4eb5552](https://github.com/matsudan/affinityfit/commit/4eb5552271477d543c99bf693ad1d0e796c0703a))
+* preserve converted interval endpoints ([8b70226](https://github.com/matsudan/affinityfit/commit/8b702268ef0131ea742980d5f1edb09201c3e443))
+* preserve converted interval endpoints ([#37](https://github.com/matsudan/affinityfit/issues/37)) ([8b70226](https://github.com/matsudan/affinityfit/commit/8b702268ef0131ea742980d5f1edb09201c3e443))
+* validate fitting inputs before optimisation ([c1a9e46](https://github.com/matsudan/affinityfit/commit/c1a9e46a9dcd66989d3c66e847882ba603e64579))
+* validate fitting inputs before optimisation ([#36](https://github.com/matsudan/affinityfit/issues/36)) ([c1a9e46](https://github.com/matsudan/affinityfit/commit/c1a9e46a9dcd66989d3c66e847882ba603e64579))
+
+
+### Documentation
+
+* correct diagnostic scope views ([#41](https://github.com/matsudan/affinityfit/issues/41)) ([98a0737](https://github.com/matsudan/affinityfit/commit/98a07371388df4afbcc3e3220a25c4cae720257f))
+* name the diagnostics that catch depletion and clarify AICc's k ([#31](https://github.com/matsudan/affinityfit/issues/31)) ([169e6b0](https://github.com/matsudan/affinityfit/commit/169e6b0981be706ef7acea88cf4627368b3178c4))
+* remove R^2 as evidence for cooperativity and a stale broken-fit threshold ([#29](https://github.com/matsudan/affinityfit/issues/29)) ([6b2e146](https://github.com/matsudan/affinityfit/commit/6b2e146e426435a6b6d40137ac2ed72d7cae3e64))
+
 ## [0.4.0](https://github.com/matsudan/affinityfit/compare/v0.3.0...v0.4.0) (2026-08-13)
 
 
