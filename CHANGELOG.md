@@ -9,12 +9,9 @@
 
 ### Bug Fixes
 
-* include fit-wide diagnostics in scoped views ([bce3cc1](https://github.com/matsudan/affinityfit/commit/bce3cc1f4b26a337da858cef2e06a114dcfa13e7))
 * include fit-wide diagnostics in scoped views ([#35](https://github.com/matsudan/affinityfit/issues/35)) ([bce3cc1](https://github.com/matsudan/affinityfit/commit/bce3cc1f4b26a337da858cef2e06a114dcfa13e7))
 * make fitted-result mappings read-only ([#40](https://github.com/matsudan/affinityfit/issues/40)) ([4eb5552](https://github.com/matsudan/affinityfit/commit/4eb5552271477d543c99bf693ad1d0e796c0703a))
-* preserve converted interval endpoints ([8b70226](https://github.com/matsudan/affinityfit/commit/8b702268ef0131ea742980d5f1edb09201c3e443))
 * preserve converted interval endpoints ([#37](https://github.com/matsudan/affinityfit/issues/37)) ([8b70226](https://github.com/matsudan/affinityfit/commit/8b702268ef0131ea742980d5f1edb09201c3e443))
-* validate fitting inputs before optimisation ([c1a9e46](https://github.com/matsudan/affinityfit/commit/c1a9e46a9dcd66989d3c66e847882ba603e64579))
 * validate fitting inputs before optimisation ([#36](https://github.com/matsudan/affinityfit/issues/36)) ([c1a9e46](https://github.com/matsudan/affinityfit/commit/c1a9e46a9dcd66989d3c66e847882ba603e64579))
 
 
