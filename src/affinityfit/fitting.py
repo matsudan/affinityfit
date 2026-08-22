@@ -21,8 +21,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import Literal
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -43,6 +42,7 @@ from affinityfit.intervals import (
     profile_intervals,
 )
 from affinityfit.models import Model, langmuir
+from affinityfit.results import GlobalFitResult
 from affinityfit.uncertainty import MIN_BOOTSTRAP_SAMPLES, Interval, Method
 
 # Cap on the exponent when a log-scale parameter is turned back into a plain value (10**309 is not representable).
@@ -504,182 +504,6 @@ def _corrected_aic(aic: float, n_points: int, n_params: int) -> float:
     return aic + 2.0 * k * (k + 1) / remaining
 
 
-@dataclass(frozen=True)
-class GlobalFitResult:
-    """Result of a fit over several datasets.
-
-    Attributes:
-        model: The model that was fitted.
-        params: `{dataset name: {parameter name: value}}`.
-        intervals: `{dataset name: {parameter name: Interval}}`. Shared parameters
-            carry the same interval in every dataset.
-        shared: Names of the parameters that were shared.
-        fixed: Names and values of the parameters that were held constant.
-        method: Which interval method was used.
-        r_squared: Coefficient of determination over all datasets combined.
-        r_squared_per: Coefficient of determination per dataset.
-        n_points: Total number of data points.
-        n_points_per: Number of data points per dataset.
-        n_free_params: Number of estimated parameters.
-        aic: Akaike information criterion. Present for reference; prefer `aicc` for
-            comparisons at these sample sizes.
-        aicc: Akaike criterion with the small-sample correction. This is the one to
-            compare models on, whether that is shared against unshared parameters or
-            one functional form against another. Lower is better.
-        unit: Name of the concentration unit, used for display only.
-        fit_diagnostics: Findings that concern the entire fit, such as no degrees of
-            freedom or bootstrap failure.
-        diagnostics_per: Findings per dataset. Each `Diagnostic` has a stable code
-            for programmatic handling and an English human-readable message.
-        statistics_per: Raw statistic and p-value per dataset behind the
-            residual-shape and heteroscedasticity checks, for applying your own
-            multiple-comparison correction across datasets. See `Statistic`.
-        receptor_conc_per: Total concentration of the fixed partner per dataset, as
-            supplied on each `Dataset`. Passed on by `result_for` so that corrections
-            applied after the fit, such as `ki_from_ic50`, can use it.
-    """
-
-    model: Model
-    params: dict[str, dict[str, float]]
-    intervals: dict[str, dict[str, Interval]]
-    shared: tuple[str, ...]
-    fixed: dict[str, float]
-    method: Method
-    r_squared: float
-    r_squared_per: dict[str, float]
-    n_points: int
-    n_points_per: dict[str, int]
-    n_free_params: int
-    aic: float
-    aicc: float
-    unit: str = ""
-    fit_diagnostics: tuple[Diagnostic, ...] = field(default_factory=tuple)
-    diagnostics_per: dict[str, tuple[Diagnostic, ...]] = field(default_factory=dict)
-    statistics_per: dict[str, tuple[Statistic, ...]] = field(default_factory=dict)
-    receptor_conc_per: dict[str, float | None] = field(default_factory=dict)
-
-    @property
-    def names(self) -> tuple[str, ...]:
-        return tuple(self.params)
-
-    @property
-    def warnings(self) -> tuple[Diagnostic, ...]:
-        """All warning diagnostics. Use `diagnostics_per` to retain dataset scope."""
-        return tuple(
-            diagnostic
-            for diagnostics in (self.fit_diagnostics, *self.diagnostics_per.values())
-            for diagnostic in diagnostics
-            if diagnostic.severity == "warning"
-        )
-
-    @property
-    def notes(self) -> tuple[Diagnostic, ...]:
-        """All note diagnostics. Use `diagnostics_per` to retain dataset scope."""
-        return tuple(
-            diagnostic
-            for diagnostics in (self.fit_diagnostics, *self.diagnostics_per.values())
-            for diagnostic in diagnostics
-            if diagnostic.severity == "note"
-        )
-
-    def _diagnostics_of_severity_per(
-        self,
-        severity: Literal["warning", "note"],
-    ) -> dict[str, tuple[Diagnostic, ...]]:
-        fit_diagnostics = tuple(diagnostic for diagnostic in self.fit_diagnostics if diagnostic.severity == severity)
-        return {
-            name: fit_diagnostics
-            + tuple(diagnostic for diagnostic in self.diagnostics_per.get(name, ()) if diagnostic.severity == severity)
-            for name in self.names
-        }
-
-    @property
-    def warnings_per(self) -> dict[str, tuple[Diagnostic, ...]]:
-        """Warning diagnostics per dataset, including fit-wide diagnostics."""
-        return self._diagnostics_of_severity_per("warning")
-
-    @property
-    def notes_per(self) -> dict[str, tuple[Diagnostic, ...]]:
-        """Note diagnostics per dataset, including fit-wide diagnostics."""
-        return self._diagnostics_of_severity_per("note")
-
-    def result_for(self, name: str) -> FitResult:
-        """Extract one dataset as a `FitResult` with local and fit-wide diagnostics.
-
-        Args:
-            name: Dataset name.
-
-        Returns:
-            FitResult for that dataset.
-
-        Raises:
-            KeyError: If no dataset has that name.
-        """
-        if name not in self.params:
-            raise KeyError(f"No such dataset: {name!r}. Available: {self.names}")
-        return FitResult(
-            model=self.model,
-            params=dict(self.params[name]),
-            intervals=dict(self.intervals[name]),
-            r_squared=self.r_squared_per[name],
-            n_points=self.n_points_per[name],
-            fixed=dict(self.fixed),
-            method=self.method,
-            aic=self.aic,
-            aicc=self.aicc,
-            unit=self.unit,
-            diagnostics=tuple(self.fit_diagnostics) + tuple(self.diagnostics_per.get(name, ())),
-            statistics=self.statistics_per.get(name, ()),
-            receptor_conc=self.receptor_conc_per.get(name),
-        )
-
-    def report(self) -> str:
-        """Render the fit and structured diagnostics as human-readable text."""
-        spec: list[str] = []
-        if self.shared:
-            spec.append("shared: " + ", ".join(self.shared))
-        if self.fixed:
-            spec.append("fixed: " + ", ".join(f"{key}={value:g}" for key, value in self.fixed.items()))
-        lines = [
-            f"model: {self.model.name}  ({self.model.description})",
-            "global fit ("
-            + ("; ".join(spec) if spec else "no shared or fixed parameters")
-            + ")"
-            + f"  {self.n_free_params} free parameters / {self.n_points} total points",
-            f"interval: {self.method}",
-            "",
-        ]
-        for name in self.names:
-            lines.append(
-                f"[{name}]  n = {self.n_points_per[name]}, R^2 = {self.r_squared_per[name]:.4f} (descriptive only)"
-            )
-            width = max(len(self.model.label(param)) for param in self.model.params)
-            for param in self.model.params:
-                label = self.model.label(param).ljust(width)
-                unit = self.unit if param == self.model.location else ""
-                if param in self.fixed:
-                    lines.append(f"  {label} = {self.params[name][param]:.4g}{' ' + unit if unit else ''}  (fixed)")
-                else:
-                    lines.append(f"  {label} = {self.intervals[name][param].format(unit)}")
-            lines.append("")
-
-        lines.append(
-            f"overall AICc = {self.aicc:.2f}   (AIC = {self.aic:.2f})   R^2 = {self.r_squared:.4f} (descriptive only)"
-        )
-        lines.extend(
-            f"{diagnostic.severity.upper()} [{diagnostic.code}]: {diagnostic.message}"
-            for diagnostic in self.fit_diagnostics
-        )
-        for name in self.names:
-            lines.extend(
-                f"{diagnostic.severity.upper()} [{name}] [{diagnostic.code}]: {diagnostic.message}"
-                for diagnostic in self.diagnostics_per.get(name, ())
-            )
-        if not self.fit_diagnostics and not any(self.diagnostics_per.values()):
-            lines.append("No diagnostic issues detected.")
-        return "\n".join(lines)
-
-
 def _validate(
     datasets: Sequence[Dataset],
     model: Model,
@@ -735,6 +559,170 @@ def _validate(
     return shared_t, fixed_d
 
 
+def _select_intervals(
+    problem: _Problem,
+    x: NDArray[np.float64],
+    ssr: float,
+    jac: NDArray[np.float64] | None,
+    ci: Method,
+    n_boot: int,
+    seed: int,
+) -> tuple[list[Interval], int]:
+    bootstrap_failures = 0
+    if ci == "asymptotic":
+        if jac is None:  # pragma: no cover - a solve without pinned slots always returns a Jacobian
+            raise RuntimeError("Jacobian unavailable; asymptotic intervals cannot be computed.")
+        slot_intervals = asymptotic_intervals(problem, x, ssr, jac)
+    elif ci == "profile":
+        slot_intervals = profile_intervals(problem, x, ssr)
+    elif ci == "bootstrap":
+        if jac is None:  # pragma: no cover - a solve without pinned slots always returns a Jacobian
+            raise RuntimeError("Jacobian unavailable; bootstrap intervals cannot be computed.")
+        slot_intervals, bootstrap_failures = bootstrap_intervals(problem, x, jac, n_boot, seed)
+    else:
+        raise ValueError(f"Unknown ci method: {ci!r}. Use 'asymptotic', 'profile' or 'bootstrap'.")
+    return slot_intervals, bootstrap_failures
+
+
+def _assemble_dataset_results(
+    problem: _Problem,
+    x: NDArray[np.float64],
+    slot_intervals: list[Interval],
+    ci: Method,
+) -> tuple[
+    dict[str, dict[str, float]],
+    dict[str, dict[str, Interval]],
+    dict[str, float],
+    dict[str, int],
+]:
+    params: dict[str, dict[str, float]] = {}
+    intervals: dict[str, dict[str, Interval]] = {}
+    r_squared_per: dict[str, float] = {}
+    n_points_per: dict[str, int] = {}
+    for i, dataset in enumerate(problem.datasets):
+        values = problem.unpack(x, i)
+        params[dataset.name] = dict(zip(problem.model.params, values, strict=True))
+        intervals[dataset.name] = {}
+        for param in problem.model.params:
+            if param in problem.fixed:
+                held = float(problem.fixed[param])
+                intervals[dataset.name][param] = Interval(point=held, lower=held, upper=held, method=ci)
+            else:
+                intervals[dataset.name][param] = slot_intervals[problem.slot_of(param, i)]
+        residuals = dataset.observed - problem.model(dataset.conc, *values)
+        centered = dataset.observed - dataset.observed.mean()
+        denominator = float(centered @ centered)
+        r_squared_per[dataset.name] = (
+            1.0 - float(residuals @ residuals) / denominator if denominator > 0 else float("nan")
+        )
+        n_points_per[dataset.name] = int(dataset.conc.size)
+    return params, intervals, r_squared_per, n_points_per
+
+
+def _calculate_fit_metrics(
+    problem: _Problem,
+    x: NDArray[np.float64],
+    ssr: float,
+) -> tuple[float, float, float]:
+    # The coefficient of determination is descriptive, so it is left unweighted; ssr is weighted and cannot be reused.
+    all_signal = np.concatenate([dataset.observed for dataset in problem.datasets])
+    unweighted_ss_res = float(
+        sum(
+            float(residuals @ residuals)
+            for residuals in (
+                dataset.observed - problem.model(dataset.conc, *problem.unpack(x, i))
+                for i, dataset in enumerate(problem.datasets)
+            )
+        )
+    )
+    centered_all = all_signal - all_signal.mean()
+    ss_tot = float(centered_all @ centered_all)
+    r_squared = 1.0 - unweighted_ss_res / ss_tot if ss_tot > 0 else float("nan")
+    aic = problem.n_points * np.log(ssr / problem.n_points) + 2 * problem.n_slots if ssr > 0 else -np.inf
+    aicc = _corrected_aic(float(aic), problem.n_points, problem.n_slots)
+    return r_squared, float(aic), float(aicc)
+
+
+def _collect_diagnostics(
+    problem: _Problem,
+    params: dict[str, dict[str, float]],
+    intervals: dict[str, dict[str, Interval]],
+    jac: NDArray[np.float64] | None,
+    bootstrap_failures: int,
+    n_boot: int,
+    shared: tuple[str, ...],
+    fixed: dict[str, float],
+) -> tuple[
+    tuple[Diagnostic, ...],
+    dict[str, tuple[Diagnostic, ...]],
+    dict[str, tuple[Statistic, ...]],
+]:
+    fit_diagnostics: list[Diagnostic] = []
+    per_diagnostics: dict[str, list[Diagnostic]] = {dataset.name: [] for dataset in problem.datasets}
+    per_statistics: dict[str, list[Statistic]] = {dataset.name: [] for dataset in problem.datasets}
+
+    # Degree-of-freedom and rank problems do not depend on the interval method, so they belong to the fit as a whole.
+    dof = problem.n_points - problem.n_slots
+    if dof < 1:
+        fit_diagnostics.append(_diagnostic(DiagnosticCode.NO_DEGREES_OF_FREEDOM, "warning"))
+    elif jac is not None:
+        rank = _jacobian_rank(jac)
+        if rank < problem.n_slots:
+            fit_diagnostics.append(_diagnostic(DiagnosticCode.RANK_DEFICIENT_JACOBIAN, "warning"))
+
+    # The resamples that converge are the ones that were easy to fit, so the number of failures is reported.
+    if bootstrap_failures:
+        successes = n_boot - bootstrap_failures
+        if successes < MIN_BOOTSTRAP_SAMPLES:
+            fit_diagnostics.append(_diagnostic(DiagnosticCode.BOOTSTRAP_INSUFFICIENT_SAMPLES, "warning"))
+        else:
+            fit_diagnostics.append(_diagnostic(DiagnosticCode.BOOTSTRAP_FAILURES, "warning"))
+
+    # Suppress the remarks whose premise changes under sharing or fixing, so the advice does not contradict itself.
+    suppressed: set[DiagnosticCode] = set()
+    if problem.model.amplitude in shared:
+        suppressed |= {DiagnosticCode.NOT_SATURATED, DiagnosticCode.WEAKLY_SATURATED}
+    if problem.model.baseline is not None and problem.model.baseline in fixed:
+        suppressed.add(DiagnosticCode.NO_LOW_CONC)
+
+    for dataset in problem.datasets:
+        loc = params[dataset.name][problem.model.location]
+        codes: set[DiagnosticCode] = set()
+        dataset_stats: list[Statistic] = []
+        for code in _diagnose_coded(
+            dataset.conc,
+            dataset.observed,
+            problem.model,
+            params[dataset.name],
+            intervals[dataset.name],
+            dataset.receptor_conc,
+            tuple(fixed),
+            dataset.sigma is not None,
+            dataset_stats,
+        ):
+            if code not in suppressed:
+                codes.add(code)
+                per_diagnostics[dataset.name].append(_diagnostic(code, "warning"))
+        per_statistics[dataset.name] = dataset_stats
+
+        unsaturated = float(dataset.conc.max()) < 3 * loc
+        # When the fit itself is broken, sharing cannot be credited with making the estimate possible; pairing that
+        # with a warning that the location value is meaningless would be contradictory advice.
+        broken = bool(codes & {DiagnosticCode.NO_FIT, DiagnosticCode.AMPLITUDE_COLLAPSED})
+        if unsaturated and problem.model.amplitude in shared and not broken:
+            per_diagnostics[dataset.name].append(
+                _diagnostic(DiagnosticCode.SHARED_AMPLITUDE_IDENTIFIES_LOCATION, "note")
+            )
+        elif unsaturated and problem.model.amplitude not in shared and len(problem.datasets) > 1:
+            per_diagnostics[dataset.name].append(_diagnostic(DiagnosticCode.UNSHARED_AMPLITUDE, "warning"))
+
+    return (
+        tuple(fit_diagnostics),
+        {name: tuple(diagnostics) for name, diagnostics in per_diagnostics.items()},
+        {name: tuple(values) for name, values in per_statistics.items()},
+    )
+
+
 def fit_global(
     datasets: Sequence[Dataset],
     model: Model = langmuir,
@@ -782,115 +770,22 @@ def fit_global(
             "interval needs; the fit would return no interval at all. Raise n_boot or use "
             "ci='profile'."
         )
+
     problem = _Problem(datasets, model, shared_t, fixed_d)
     x, ssr, jac = problem.solve()
-
-    bootstrap_failures = 0
-    if ci == "asymptotic":
-        if jac is None:  # pragma: no cover - a solve without pinned slots always returns a Jacobian
-            raise RuntimeError("Jacobian unavailable; asymptotic intervals cannot be computed.")
-        slot_intervals = asymptotic_intervals(problem, x, ssr, jac)
-    elif ci == "profile":
-        slot_intervals = profile_intervals(problem, x, ssr)
-    elif ci == "bootstrap":
-        if jac is None:  # pragma: no cover - a solve without pinned slots always returns a Jacobian
-            raise RuntimeError("Jacobian unavailable; bootstrap intervals cannot be computed.")
-        slot_intervals, bootstrap_failures = bootstrap_intervals(problem, x, jac, n_boot, seed)
-    else:
-        raise ValueError(f"Unknown ci method: {ci!r}. Use 'asymptotic', 'profile' or 'bootstrap'.")
-
-    params: dict[str, dict[str, float]] = {}
-    intervals: dict[str, dict[str, Interval]] = {}
-    r2_per: dict[str, float] = {}
-    n_per: dict[str, int] = {}
-    for i, d in enumerate(problem.datasets):
-        values = problem.unpack(x, i)
-        params[d.name] = dict(zip(model.params, values, strict=True))
-        intervals[d.name] = {}
-        for param in model.params:
-            if param in fixed_d:
-                held = float(fixed_d[param])
-                intervals[d.name][param] = Interval(point=held, lower=held, upper=held, method=ci)
-            else:
-                intervals[d.name][param] = slot_intervals[problem.slot_of(param, i)]
-        resid = d.observed - model(d.conc, *values)
-        centered = d.observed - d.observed.mean()
-        denom = float(centered @ centered)
-        r2_per[d.name] = 1.0 - float(resid @ resid) / denom if denom > 0 else float("nan")
-        n_per[d.name] = int(d.conc.size)
-
-    # The coefficient of determination is descriptive, so it is left unweighted; ssr is weighted and cannot be reused.
-    all_signal = np.concatenate([d.observed for d in problem.datasets])
-    unweighted_ss_res = float(
-        sum(
-            float(resid @ resid)
-            for resid in (d.observed - model(d.conc, *problem.unpack(x, i)) for i, d in enumerate(problem.datasets))
-        )
+    slot_intervals, bootstrap_failures = _select_intervals(problem, x, ssr, jac, ci, n_boot, seed)
+    params, intervals, r_squared_per, n_points_per = _assemble_dataset_results(problem, x, slot_intervals, ci)
+    r_squared, aic, aicc = _calculate_fit_metrics(problem, x, ssr)
+    fit_diagnostics, diagnostics_per, statistics_per = _collect_diagnostics(
+        problem,
+        params,
+        intervals,
+        jac,
+        bootstrap_failures,
+        n_boot,
+        shared_t,
+        fixed_d,
     )
-    centered_all = all_signal - all_signal.mean()
-    ss_tot = float(centered_all @ centered_all)
-    r_squared = 1.0 - unweighted_ss_res / ss_tot if ss_tot > 0 else float("nan")
-    aic = problem.n_points * np.log(ssr / problem.n_points) + 2 * problem.n_slots if ssr > 0 else -np.inf
-    aicc = _corrected_aic(float(aic), problem.n_points, problem.n_slots)
-
-    fit_diagnostics: list[Diagnostic] = []
-    per_diagnostics: dict[str, list[Diagnostic]] = {dataset.name: [] for dataset in problem.datasets}
-    per_statistics: dict[str, list[Statistic]] = {dataset.name: [] for dataset in problem.datasets}
-
-    # Degree-of-freedom and rank problems do not depend on the interval method, so they belong to the fit as a whole.
-    dof = problem.n_points - problem.n_slots
-    if dof < 1:
-        fit_diagnostics.append(_diagnostic(DiagnosticCode.NO_DEGREES_OF_FREEDOM, "warning"))
-    elif jac is not None:
-        rank = _jacobian_rank(jac)
-        if rank < problem.n_slots:
-            fit_diagnostics.append(_diagnostic(DiagnosticCode.RANK_DEFICIENT_JACOBIAN, "warning"))
-
-    # The resamples that converge are the ones that were easy to fit, so the number of failures is reported.
-    if bootstrap_failures:
-        successes = n_boot - bootstrap_failures
-        if successes < MIN_BOOTSTRAP_SAMPLES:
-            fit_diagnostics.append(_diagnostic(DiagnosticCode.BOOTSTRAP_INSUFFICIENT_SAMPLES, "warning"))
-        else:
-            fit_diagnostics.append(_diagnostic(DiagnosticCode.BOOTSTRAP_FAILURES, "warning"))
-
-    # Suppress the remarks whose premise changes under sharing or fixing, so the advice does not contradict itself.
-    suppressed: set[DiagnosticCode] = set()
-    if model.amplitude in shared_t:
-        suppressed |= {DiagnosticCode.NOT_SATURATED, DiagnosticCode.WEAKLY_SATURATED}
-    if model.baseline is not None and model.baseline in fixed_d:
-        suppressed.add(DiagnosticCode.NO_LOW_CONC)
-
-    for dataset in problem.datasets:
-        loc = params[dataset.name][model.location]
-        codes: set[DiagnosticCode] = set()
-        dataset_stats: list[Statistic] = []
-        for code in _diagnose_coded(
-            dataset.conc,
-            dataset.observed,
-            model,
-            params[dataset.name],
-            intervals[dataset.name],
-            dataset.receptor_conc,
-            tuple(fixed_d),
-            dataset.sigma is not None,
-            dataset_stats,
-        ):
-            if code not in suppressed:
-                codes.add(code)
-                per_diagnostics[dataset.name].append(_diagnostic(code, "warning"))
-        per_statistics[dataset.name] = dataset_stats
-
-        unsaturated = float(dataset.conc.max()) < 3 * loc
-        # When the fit itself is broken, sharing cannot be credited with making the estimate possible; pairing that
-        # with a warning that the location value is meaningless would be contradictory advice.
-        broken = bool(codes & {DiagnosticCode.NO_FIT, DiagnosticCode.AMPLITUDE_COLLAPSED})
-        if unsaturated and model.amplitude in shared_t and not broken:
-            per_diagnostics[dataset.name].append(
-                _diagnostic(DiagnosticCode.SHARED_AMPLITUDE_IDENTIFIES_LOCATION, "note")
-            )
-        elif unsaturated and model.amplitude not in shared_t and len(problem.datasets) > 1:
-            per_diagnostics[dataset.name].append(_diagnostic(DiagnosticCode.UNSHARED_AMPLITUDE, "warning"))
 
     return GlobalFitResult(
         model=model,
@@ -900,16 +795,16 @@ def fit_global(
         fixed=fixed_d,
         method=ci,
         r_squared=r_squared,
-        r_squared_per=r2_per,
+        r_squared_per=r_squared_per,
         n_points=problem.n_points,
-        n_points_per=n_per,
+        n_points_per=n_points_per,
         n_free_params=problem.n_slots,
-        aic=float(aic),
-        aicc=float(aicc),
+        aic=aic,
+        aicc=aicc,
         unit=unit,
-        fit_diagnostics=tuple(fit_diagnostics),
-        diagnostics_per={name: tuple(diagnostics) for name, diagnostics in per_diagnostics.items()},
-        statistics_per={name: tuple(values) for name, values in per_statistics.items()},
+        fit_diagnostics=fit_diagnostics,
+        diagnostics_per=diagnostics_per,
+        statistics_per=statistics_per,
         receptor_conc_per={dataset.name: dataset.receptor_conc for dataset in problem.datasets},
     )
 
