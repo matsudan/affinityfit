@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -501,21 +502,26 @@ class GlobalFitResult:
             if diagnostic.severity == "note"
         )
 
-    @property
-    def warnings_per(self) -> dict[str, tuple[Diagnostic, ...]]:
-        """Warning diagnostics per dataset."""
+    def _diagnostics_of_severity_per(
+        self,
+        severity: Literal["warning", "note"],
+    ) -> dict[str, tuple[Diagnostic, ...]]:
+        fit_diagnostics = tuple(diagnostic for diagnostic in self.fit_diagnostics if diagnostic.severity == severity)
         return {
-            name: tuple(diagnostic for diagnostic in diagnostics if diagnostic.severity == "warning")
-            for name, diagnostics in self.diagnostics_per.items()
+            name: fit_diagnostics
+            + tuple(diagnostic for diagnostic in self.diagnostics_per.get(name, ()) if diagnostic.severity == severity)
+            for name in self.names
         }
 
     @property
+    def warnings_per(self) -> dict[str, tuple[Diagnostic, ...]]:
+        """Warning diagnostics per dataset, including fit-wide diagnostics."""
+        return self._diagnostics_of_severity_per("warning")
+
+    @property
     def notes_per(self) -> dict[str, tuple[Diagnostic, ...]]:
-        """Note diagnostics per dataset."""
-        return {
-            name: tuple(diagnostic for diagnostic in diagnostics if diagnostic.severity == "note")
-            for name, diagnostics in self.diagnostics_per.items()
-        }
+        """Note diagnostics per dataset, including fit-wide diagnostics."""
+        return self._diagnostics_of_severity_per("note")
 
     def result_for(self, name: str) -> FitResult:
         """Extract one dataset as a `FitResult` with local and fit-wide diagnostics.
