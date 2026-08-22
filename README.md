@@ -143,9 +143,9 @@ print(res.report())
 `fit_diagnostics` contains findings about the complete fit, while
 `diagnostics_per` keeps each dataset's findings scoped to its name. `result_for()`
 combines those fit-wide and local records into its `FitResult`. `warnings` and
-`notes` are severity-filtered views over both scopes at once; `warnings_per` and
-`notes_per` cover the per-dataset findings only, so reading those alone misses
-anything in `fit_diagnostics`.
+`notes` are severity-filtered views over both scopes at once. `warnings_per` and
+`notes_per` provide the corresponding view per dataset and include fit-wide findings
+in every dataset entry.
 
 ## Weighting
 
