@@ -33,10 +33,10 @@ uv add affinityfit
 import numpy as np
 from affinityfit import DiagnosticCode, fit
 
-conc, signal = np.genfromtxt(
+conc, signal = np.loadtxt(
     "titration.csv",
     delimiter=",",
-    skip_header=1,
+    skiprows=1,
     unpack=True,
 )
 res = fit(conc, signal, unit="nM")
@@ -67,19 +67,8 @@ Each member is a plain string (`DiagnosticCode.NOT_SATURATED == "not_saturated"`
 comparing `diagnostic.code` against either the enum member or the equivalent string
 literal works the same way.
 
-The minimal CSV format places one header row on the first physical line, with
-concentration in the first column and signal in the second. `np.genfromtxt` skips that
-header and any subsequent comment or blank rows. Repeated rows at the same concentration
-remain separate data points; passing them to the bootstrap as replicates requires the
-separate `replicates` argument described below.
-
-The commented CSV files in `examples/` place comments before the header. In a source
-checkout, `examples/plot_fit.py` provides `read_csv()` for that format.
-
-An empty delimited cell, `nan`, or `inf` is loaded as a non-finite value, and
-`fit()` raises an error naming its array index. A row with fewer or more than two fields
-is rejected by `np.genfromtxt` during parsing. A negative concentration also raises an
-error, and the default three-parameter fit requires at least three numeric rows.
+The CSV has one header row, with concentration in the first column and signal in the
+second.
 
 ```csv
 concentration_nM,signal
