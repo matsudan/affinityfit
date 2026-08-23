@@ -35,10 +35,13 @@ from numpy.typing import NDArray
 from scipy import stats
 
 from affinityfit.models import Model
-from affinityfit.uncertainty import MIN_BOOTSTRAP_SAMPLES, SEARCH_SPAN, Interval, Method
-
-# Cap on the exponent when a log-scale parameter is turned back into a plain value (10**309 is not representable).
-_LOG_LIMIT = 300.0
+from affinityfit.uncertainty import (
+    _LOG_PARAMETER_LIMIT,
+    MIN_BOOTSTRAP_SAMPLES,
+    SEARCH_SPAN,
+    Interval,
+    Method,
+)
 
 
 class _FittedDataset(Protocol):
@@ -155,7 +158,7 @@ def asymptotic_intervals(
         value = float(x[j])
         # A half-width too large to represent as an exponent means the curvature is near 0, a sign that the parameter
         # is unidentifiable, and exponentiating it gives inf. An infinite limit is no limit, so return undetermined.
-        if not np.isfinite(half[j]) or (problem.log_slots[j] and half[j] >= _LOG_LIMIT):
+        if not np.isfinite(half[j]) or (problem.log_slots[j] and half[j] >= _LOG_PARAMETER_LIMIT):
             intervals.append(Interval(point=value, lower=None, upper=None, method="asymptotic"))
             continue
         if problem.log_slots[j]:
@@ -280,7 +283,7 @@ def profile_bounds(
 def profile_intervals(problem: FittedProblem, x: NDArray[np.float64], ssr: float) -> list[Interval]:
     dof = problem.n_points - problem.n_slots
     if dof < 1:
-        return [Interval(point=float(v), lower=None, upper=None, method="profile") for v in x]
+        return _undetermined(x, "profile")
     threshold = ssr * (1.0 + float(stats.f.ppf(0.95, 1, dof)) / dof)
 
     all_conc = np.concatenate([d.conc for d in problem.datasets])

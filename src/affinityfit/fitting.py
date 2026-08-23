@@ -43,10 +43,7 @@ from affinityfit.intervals import (
 )
 from affinityfit.models import Model, langmuir
 from affinityfit.results import GlobalFitResult
-from affinityfit.uncertainty import MIN_BOOTSTRAP_SAMPLES, Interval, Method
-
-# Cap on the exponent when a log-scale parameter is turned back into a plain value (10**309 is not representable).
-_LOG_LIMIT = 300.0
+from affinityfit.uncertainty import _LOG_PARAMETER_LIMIT, MIN_BOOTSTRAP_SAMPLES, Interval, Method
 
 
 def _positions(mask: NDArray[np.bool_], limit: int = 5) -> str:
@@ -245,7 +242,6 @@ class _ParameterLayout:
 
         self.slots: dict[str, list[int]] = {}
         self.slot_param: list[str] = []
-        self.slot_dataset: list[str | None] = []
         x0: list[float] = []
         lower: list[float] = []
         upper: list[float] = []
@@ -261,14 +257,12 @@ class _ParameterLayout:
                 lower.append(model.lower(name))
                 upper.append(model.upper(name))
                 self.slot_param.append(name)
-                self.slot_dataset.append(None)
             else:
                 self.slots[name] = list(range(len(x0), len(x0) + n_sets))
                 x0.extend(float(v) for v in values)
                 lower.extend([model.lower(name)] * n_sets)
                 upper.extend([model.upper(name)] * n_sets)
                 self.slot_param.extend([name] * n_sets)
-                self.slot_dataset.extend(d.name for d in datasets)
 
         initial = np.asarray(x0, dtype=float)
         if not np.all(np.isfinite(initial)):
@@ -286,9 +280,10 @@ class _ParameterLayout:
         # Without that, multiplying sigma by a constant changes the absolute size of the residuals, and the answer
         # moves with it through the optimiser's convergence test. The relative weighting between datasets has to be
         # preserved, so the normalisation applies one factor to the whole problem rather than one per dataset.
-        raw = np.concatenate([d.weights for d in datasets])
+        weights = [dataset.weights for dataset in datasets]
+        raw = np.concatenate(weights)
         scale = float(np.exp(np.mean(np.log(raw))))
-        self.point_weights = [d.weights / scale for d in datasets]
+        self.point_weights = [values / scale for values in weights]
 
     def slot_of(self, param: str, dataset_index: int) -> int:
         pos = self.slots[param]
@@ -316,7 +311,7 @@ class _ParameterLayout:
         out = np.array(values, dtype=float)
         for position, j in enumerate(slots):
             if self.log_slots[j]:
-                out[position] = 10.0 ** float(np.clip(values[position], -_LOG_LIMIT, _LOG_LIMIT))
+                out[position] = 10.0 ** float(np.clip(values[position], -_LOG_PARAMETER_LIMIT, _LOG_PARAMETER_LIMIT))
         return out
 
     def internal_bounds(self, slots: Sequence[int]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -325,9 +320,9 @@ class _ParameterLayout:
         for position, j in enumerate(slots):
             if self.log_slots[j]:
                 # An infinite upper bound overflows the moment it is exponentiated, so it is held down.
-                lower[position] = max(np.log10(self.lower[j]), -_LOG_LIMIT)
-                bound = np.log10(self.upper[j]) if np.isfinite(self.upper[j]) else _LOG_LIMIT
-                upper[position] = min(bound, _LOG_LIMIT)
+                lower[position] = max(np.log10(self.lower[j]), -_LOG_PARAMETER_LIMIT)
+                bound = np.log10(self.upper[j]) if np.isfinite(self.upper[j]) else _LOG_PARAMETER_LIMIT
+                upper[position] = min(bound, _LOG_PARAMETER_LIMIT)
         return lower, upper
 
 
@@ -347,7 +342,6 @@ class _Problem:
         fixed: Mapping[str, float],
     ) -> None:
         self.datasets = list(datasets)
-        self.shared = shared
         self.layout = _ParameterLayout(self.datasets, model, shared, fixed)
 
     @property
@@ -559,6 +553,16 @@ def _validate(
     return shared_t, fixed_d
 
 
+def _validate_ci(ci: str) -> Method:
+    if ci == "asymptotic":
+        return "asymptotic"
+    if ci == "profile":
+        return "profile"
+    if ci == "bootstrap":
+        return "bootstrap"
+    raise ValueError(f"Unknown ci method: {ci!r}. Use 'asymptotic', 'profile' or 'bootstrap'.")
+
+
 def _select_intervals(
     problem: _Problem,
     x: NDArray[np.float64],
@@ -575,12 +579,10 @@ def _select_intervals(
         slot_intervals = asymptotic_intervals(problem, x, ssr, jac)
     elif ci == "profile":
         slot_intervals = profile_intervals(problem, x, ssr)
-    elif ci == "bootstrap":
+    else:
         if jac is None:  # pragma: no cover - a solve without pinned slots always returns a Jacobian
             raise RuntimeError("Jacobian unavailable; bootstrap intervals cannot be computed.")
         slot_intervals, bootstrap_failures = bootstrap_intervals(problem, x, jac, n_boot, seed)
-    else:
-        raise ValueError(f"Unknown ci method: {ci!r}. Use 'asymptotic', 'profile' or 'bootstrap'.")
     return slot_intervals, bootstrap_failures
 
 
@@ -707,10 +709,9 @@ def _collect_diagnostics(
 
     for evaluation in evaluations:
         dataset = evaluation.dataset
-        loc = evaluation.params[problem.model.location]
         codes: set[DiagnosticCode] = set()
         dataset_stats: list[Statistic] = []
-        for code in _diagnose_coded(
+        diagnosed = _diagnose_coded(
             dataset.conc,
             dataset.observed,
             problem.model,
@@ -721,13 +722,14 @@ def _collect_diagnostics(
             dataset.sigma is not None,
             dataset_stats,
             evaluation.fitted,
-        ):
+        )
+        for code in diagnosed:
             if code not in suppressed:
                 codes.add(code)
                 per_diagnostics[dataset.name].append(_diagnostic(code, "warning"))
         per_statistics[dataset.name] = dataset_stats
 
-        unsaturated = float(dataset.conc.max()) < 3 * loc
+        unsaturated = DiagnosticCode.NOT_SATURATED in diagnosed
         # When the fit itself is broken, sharing cannot be credited with making the estimate possible; pairing that
         # with a warning that the location value is meaningless would be contradictory advice.
         broken = bool(codes & {DiagnosticCode.NO_FIT, DiagnosticCode.AMPLITUDE_COLLAPSED})
@@ -785,6 +787,7 @@ def fit_global(
         larger dominates unless `Dataset.sigma` says otherwise. Give sigma, or
         normalise the signals onto a common scale, when they differ in magnitude.
     """
+    ci = _validate_ci(ci)
     shared_t, fixed_d = _validate(datasets, model, shared, fixed or {})
     if ci == "bootstrap" and n_boot < MIN_BOOTSTRAP_SAMPLES:
         raise ValueError(

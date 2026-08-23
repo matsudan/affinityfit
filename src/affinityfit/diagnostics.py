@@ -14,6 +14,13 @@ from scipy import stats
 from affinityfit.models import Model
 from affinityfit.uncertainty import Interval
 
+_RUNS_ALPHA = 0.025
+# The verdict uses the conventional rounded z critical value; alpha records its nominal significance level.
+_RUNS_Z_THRESHOLD = -1.96
+_AUTOCORRELATION_THRESHOLD = 0.3
+_MODEL_VS_CONSTANT_ALPHA = 0.01
+_HETEROSCEDASTICITY_ALPHA = 0.01
+
 
 @dataclass(frozen=True)
 class Statistic:
@@ -216,8 +223,7 @@ def _residual_structure(
     mean_runs = 2.0 * n_pos * n_neg / total + 1.0
     variance = (mean_runs - 1.0) * (mean_runs - 2.0) / (total - 1.0)
     z = (runs - mean_runs) / float(np.sqrt(variance)) if variance > 0 else 0.0
-    # One-sided: only a deficit of runs (z very negative) is evidence of systematic structure. The
-    # existing "z >= -1.96" threshold below is exactly the one-sided 2.5% critical value of this p-value.
+    # One-sided: only a deficit of runs (z very negative) is evidence of systematic structure.
     p_runs = float(stats.norm.cdf(z))
 
     centered = residuals - residuals.mean()
@@ -225,12 +231,19 @@ def _residual_structure(
     autocorr = float(centered[:-1] @ centered[1:]) / denominator if denominator > 0 else 0.0
 
     if stats_out is not None:
-        stats_out.append(Statistic(name="residual_runs", statistic=z, p_value=p_runs, alpha=0.025))
+        stats_out.append(Statistic(name="residual_runs", statistic=z, p_value=p_runs, alpha=_RUNS_ALPHA))
         # No null distribution is used for the threshold itself, so there is no p-value; `alpha` here is
         # a bound on `statistic` (the correlation), not a probability.
-        stats_out.append(Statistic(name="residual_autocorrelation", statistic=autocorr, p_value=None, alpha=0.3))
+        stats_out.append(
+            Statistic(
+                name="residual_autocorrelation",
+                statistic=autocorr,
+                p_value=None,
+                alpha=_AUTOCORRELATION_THRESHOLD,
+            )
+        )
 
-    if z >= -1.96 and autocorr <= 0.3:
+    if z >= _RUNS_Z_THRESHOLD and autocorr <= _AUTOCORRELATION_THRESHOLD:
         return []
 
     return [DiagnosticCode.RESIDUAL_STRUCTURE]
@@ -274,8 +287,15 @@ def _no_fit(
     f_statistic = ((ss_tot - ss_res) / dof1) / (ss_res / dof2) if ss_res > 0 else float("inf")
     p_value = float(stats.f.sf(f_statistic, dof1, dof2)) if np.isfinite(f_statistic) else 0.0
     if stats_out is not None:
-        stats_out.append(Statistic(name="model_vs_constant", statistic=f_statistic, p_value=p_value, alpha=0.01))
-    if p_value < 0.01:
+        stats_out.append(
+            Statistic(
+                name="model_vs_constant",
+                statistic=f_statistic,
+                p_value=p_value,
+                alpha=_MODEL_VS_CONSTANT_ALPHA,
+            )
+        )
+    if p_value < _MODEL_VS_CONSTANT_ALPHA:
         return []
     return [DiagnosticCode.NO_FIT]
 
@@ -321,9 +341,14 @@ def _heteroscedastic(
     p_one_sided = p_two_sided / 2.0 if rho > 0 else 1.0 - p_two_sided / 2.0
     if stats_out is not None:
         stats_out.append(
-            Statistic(name="heteroscedasticity", statistic=float(rho), p_value=float(p_one_sided), alpha=0.01)
+            Statistic(
+                name="heteroscedasticity",
+                statistic=float(rho),
+                p_value=float(p_one_sided),
+                alpha=_HETEROSCEDASTICITY_ALPHA,
+            )
         )
-    if rho <= 0 or p_one_sided >= 0.01:
+    if rho <= 0 or p_one_sided >= _HETEROSCEDASTICITY_ALPHA:
         return []
     return [DiagnosticCode.HETEROSCEDASTIC]
 

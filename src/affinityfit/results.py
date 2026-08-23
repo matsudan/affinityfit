@@ -25,6 +25,10 @@ def _freeze_nested_mapping[K, InnerK, V](
     return _freeze_mapping({key: _freeze_mapping(inner) for key, inner in mapping.items()})
 
 
+def _format_information_criteria(label: str, aic: float, aicc: float) -> str:
+    return f"{label} = {aicc:.2f}   (AIC = {aic:.2f})"
+
+
 @dataclass(frozen=True)
 class FitResult:
     """Fitted parameters together with diagnostic messages.
@@ -161,8 +165,7 @@ class FitResult:
                 lines.append(f"{label} = {self.params[name]:.4g}{suffix}  (fixed)")
             else:
                 lines.append(f"{label} = {self.intervals[name].format(unit)}")
-        if np.isfinite(self.aicc):
-            lines.append(f"{'AICc'.ljust(width)} = {self.aicc:.2f}   (AIC = {self.aic:.2f})")
+        lines.append(_format_information_criteria("AICc".ljust(width), self.aic, self.aicc))
         lines.append(f"{'R^2'.ljust(width)} = {self.r_squared:.4f}   (n = {self.n_points}; descriptive only)")
         lines.append("")
         lines.extend(
@@ -301,11 +304,11 @@ class GlobalFitResult:
             raise KeyError(f"No such dataset: {name!r}. Available: {self.names}")
         return FitResult(
             model=self.model,
-            params=dict(self.params[name]),
-            intervals=dict(self.intervals[name]),
+            params=self.params[name],
+            intervals=self.intervals[name],
             r_squared=self.r_squared_per[name],
             n_points=self.n_points_per[name],
-            fixed=dict(self.fixed),
+            fixed=self.fixed,
             method=self.method,
             aic=self.aic,
             aicc=self.aicc,
@@ -346,7 +349,8 @@ class GlobalFitResult:
             lines.append("")
 
         lines.append(
-            f"overall AICc = {self.aicc:.2f}   (AIC = {self.aic:.2f})   R^2 = {self.r_squared:.4f} (descriptive only)"
+            _format_information_criteria("overall AICc", self.aic, self.aicc)
+            + f"   R^2 = {self.r_squared:.4f} (descriptive only)"
         )
         lines.extend(
             f"{diagnostic.severity.upper()} [{diagnostic.code}]: {diagnostic.message}"
