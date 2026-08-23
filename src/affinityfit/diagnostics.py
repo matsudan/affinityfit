@@ -155,6 +155,7 @@ def _residual_structure(
     model: Model,
     params: Mapping[str, float],
     stats_out: list[Statistic] | None = None,
+    fitted: NDArray[np.float64] | None = None,
 ) -> list[DiagnosticCode]:
     """Test whether the residuals are systematically arranged along the curve.
 
@@ -178,15 +179,15 @@ def _residual_structure(
     used here.
     """
     order = np.argsort(conc)
-    fitted = model(conc[order], *model.ordered(params))
-    residuals = signal[order] - fitted
+    predicted = model(conc[order], *model.ordered(params)) if fitted is None else fitted[order]
+    residuals = signal[order] - predicted
     if residuals.size < 8:
         return []
 
     scale = max(
         float(signal.max() - signal.min()),
         float(np.abs(signal).max()),
-        float(np.abs(fitted).max()),
+        float(np.abs(predicted).max()),
     )
     rms = float(np.sqrt(np.mean(residuals**2)))
     if scale <= 0 or rms <= 1e-6 * scale:
@@ -242,6 +243,7 @@ def _no_fit(
     params: Mapping[str, float],
     n_estimated: int,
     stats_out: list[Statistic] | None = None,
+    fitted: NDArray[np.float64] | None = None,
 ) -> list[DiagnosticCode]:
     """Test whether the fitted model explains the data better than its own mean would.
 
@@ -260,7 +262,8 @@ def _no_fit(
     dof2 = conc.size - n_estimated
     if dof1 < 1 or dof2 < 1:
         return []
-    fitted = model(conc, *model.ordered(params))
+    if fitted is None:
+        fitted = model(conc, *model.ordered(params))
     ss_res = float(np.sum((signal - fitted) ** 2))
     ss_tot = float(np.sum((signal - signal.mean()) ** 2))
     if ss_tot <= 0:
@@ -283,6 +286,7 @@ def _heteroscedastic(
     model: Model,
     params: Mapping[str, float],
     stats_out: list[Statistic] | None = None,
+    fitted: NDArray[np.float64] | None = None,
 ) -> list[DiagnosticCode]:
     """Test whether the size of the residuals grows with the fitted value.
 
@@ -304,7 +308,8 @@ def _heteroscedastic(
     """
     if conc.size < 8:
         return []
-    fitted = model(conc, *model.ordered(params))
+    if fitted is None:
+        fitted = model(conc, *model.ordered(params))
     residuals = np.abs(signal - fitted)
     if np.allclose(residuals, 0.0) or np.ptp(fitted) == 0:
         return []
@@ -333,6 +338,7 @@ def _diagnose_coded(
     fixed_names: tuple[str, ...] = (),
     weighted: bool = False,
     stats_out: list[Statistic] | None = None,
+    fitted: NDArray[np.float64] | None = None,
 ) -> tuple[DiagnosticCode, ...]:
     """Return the diagnostic codes that apply.
 
@@ -357,6 +363,8 @@ def _diagnose_coded(
         stats_out: When given, the statistics behind the model-vs-constant,
             residual-shape and heteroscedasticity checks are appended to it,
             whether or not they end up warranting a message. See `Statistic`.
+        fitted: Precomputed model values at `conc`. The model is evaluated once when
+            these values are omitted.
     """
     loc = float(params[model.location])
 
@@ -367,6 +375,8 @@ def _diagnose_coded(
     # Fixed parameters are not counted (the same counting as the degrees of freedom in `fit_global`).
     # A shared parameter costs less than one parameter, but is counted as a whole one to stay on the safe side.
     n_estimated = len(model.params) - len(fixed_names or ())
+    if fitted is None:
+        fitted = model(conc, *model.ordered(params))
 
     # --- When the model and the data do not match at all, say so before anything else. A saturation curve
     # still fits as a horizontal line with the amplitude collapsed to 0.
@@ -376,15 +386,15 @@ def _diagnose_coded(
     if spread > 0 and abs(amplitude) <= 0.01 * spread:
         msgs.append(DiagnosticCode.AMPLITUDE_COLLAPSED)
 
-    msgs.extend(_no_fit(conc, signal, model, params, n_estimated, stats_out))
+    msgs.extend(_no_fit(conc, signal, model, params, n_estimated, stats_out, fitted))
 
     # --- Whether the residuals have systematic structure. Even with a high coefficient of determination, a
     # biased sign pattern means the shape of the model does not match the mechanism.
-    msgs.extend(_residual_structure(conc, signal, model, params, stats_out))
+    msgs.extend(_residual_structure(conc, signal, model, params, stats_out, fitted))
 
     # --- If the size of the error differs from point to point, say that weights should be supplied.
     if not weighted:
-        msgs.extend(_heteroscedastic(conc, signal, model, params, stats_out))
+        msgs.extend(_heteroscedastic(conc, signal, model, params, stats_out, fitted))
 
     # --- A value stuck at a bound is a product of the constraint, not an estimate, so it cannot be reported.
     already = set(msgs)
