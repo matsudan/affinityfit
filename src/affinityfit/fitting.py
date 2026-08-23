@@ -584,9 +584,38 @@ def _select_intervals(
     return slot_intervals, bootstrap_failures
 
 
-def _assemble_dataset_results(
+@dataclass(frozen=True)
+class _DatasetEvaluation:
+    """One validated post-solve model evaluation for a dataset."""
+
+    dataset: Dataset
+    params: dict[str, float]
+    fitted: NDArray[np.float64]
+    residuals: NDArray[np.float64]
+
+
+def _evaluate_datasets(
     problem: _Problem,
     x: NDArray[np.float64],
+) -> list[_DatasetEvaluation]:
+    evaluations: list[_DatasetEvaluation] = []
+    for i, dataset in enumerate(problem.datasets):
+        values = problem.unpack(x, i)
+        fitted = problem._predict(x, i)
+        evaluations.append(
+            _DatasetEvaluation(
+                dataset=dataset,
+                params=dict(zip(problem.model.params, values, strict=True)),
+                fitted=fitted,
+                residuals=dataset.observed - fitted,
+            )
+        )
+    return evaluations
+
+
+def _assemble_dataset_results(
+    problem: _Problem,
+    evaluations: Sequence[_DatasetEvaluation],
     slot_intervals: list[Interval],
     ci: Method,
 ) -> tuple[
@@ -599,9 +628,9 @@ def _assemble_dataset_results(
     intervals: dict[str, dict[str, Interval]] = {}
     r_squared_per: dict[str, float] = {}
     n_points_per: dict[str, int] = {}
-    for i, dataset in enumerate(problem.datasets):
-        values = problem.unpack(x, i)
-        params[dataset.name] = dict(zip(problem.model.params, values, strict=True))
+    for i, evaluation in enumerate(evaluations):
+        dataset = evaluation.dataset
+        params[dataset.name] = evaluation.params
         intervals[dataset.name] = {}
         for param in problem.model.params:
             if param in problem.fixed:
@@ -609,11 +638,10 @@ def _assemble_dataset_results(
                 intervals[dataset.name][param] = Interval(point=held, lower=held, upper=held, method=ci)
             else:
                 intervals[dataset.name][param] = slot_intervals[problem.slot_of(param, i)]
-        residuals = dataset.observed - problem.model(dataset.conc, *values)
         centered = dataset.observed - dataset.observed.mean()
         denominator = float(centered @ centered)
         r_squared_per[dataset.name] = (
-            1.0 - float(residuals @ residuals) / denominator if denominator > 0 else float("nan")
+            1.0 - float(evaluation.residuals @ evaluation.residuals) / denominator if denominator > 0 else float("nan")
         )
         n_points_per[dataset.name] = int(dataset.conc.size)
     return params, intervals, r_squared_per, n_points_per
@@ -621,20 +649,12 @@ def _assemble_dataset_results(
 
 def _calculate_fit_metrics(
     problem: _Problem,
-    x: NDArray[np.float64],
+    evaluations: Sequence[_DatasetEvaluation],
     ssr: float,
 ) -> tuple[float, float, float]:
     # The coefficient of determination is descriptive, so it is left unweighted; ssr is weighted and cannot be reused.
-    all_signal = np.concatenate([dataset.observed for dataset in problem.datasets])
-    unweighted_ss_res = float(
-        sum(
-            float(residuals @ residuals)
-            for residuals in (
-                dataset.observed - problem.model(dataset.conc, *problem.unpack(x, i))
-                for i, dataset in enumerate(problem.datasets)
-            )
-        )
-    )
+    all_signal = np.concatenate([evaluation.dataset.observed for evaluation in evaluations])
+    unweighted_ss_res = float(sum(float(evaluation.residuals @ evaluation.residuals) for evaluation in evaluations))
     centered_all = all_signal - all_signal.mean()
     ss_tot = float(centered_all @ centered_all)
     r_squared = 1.0 - unweighted_ss_res / ss_tot if ss_tot > 0 else float("nan")
@@ -645,7 +665,7 @@ def _calculate_fit_metrics(
 
 def _collect_diagnostics(
     problem: _Problem,
-    params: dict[str, dict[str, float]],
+    evaluations: Sequence[_DatasetEvaluation],
     intervals: dict[str, dict[str, Interval]],
     jac: NDArray[np.float64] | None,
     bootstrap_failures: int,
@@ -685,20 +705,22 @@ def _collect_diagnostics(
     if problem.model.baseline is not None and problem.model.baseline in fixed:
         suppressed.add(DiagnosticCode.NO_LOW_CONC)
 
-    for dataset in problem.datasets:
-        loc = params[dataset.name][problem.model.location]
+    for evaluation in evaluations:
+        dataset = evaluation.dataset
+        loc = evaluation.params[problem.model.location]
         codes: set[DiagnosticCode] = set()
         dataset_stats: list[Statistic] = []
         for code in _diagnose_coded(
             dataset.conc,
             dataset.observed,
             problem.model,
-            params[dataset.name],
+            evaluation.params,
             intervals[dataset.name],
             dataset.receptor_conc,
             tuple(fixed),
             dataset.sigma is not None,
             dataset_stats,
+            evaluation.fitted,
         ):
             if code not in suppressed:
                 codes.add(code)
@@ -754,8 +776,8 @@ def fit_global(
 
     Raises:
         ValueError: If the datasets, model initialisation or output, or shared/fixed
-            specification is invalid, or `n_boot` is too small to form a percentile
-            interval.
+            specification is invalid, fewer total data points than estimated parameters
+            are given, or `n_boot` is too small to form a percentile interval.
         RuntimeError: If the optimisation does not converge.
 
     Note:
@@ -772,13 +794,16 @@ def fit_global(
         )
 
     problem = _Problem(datasets, model, shared_t, fixed_d)
+    if problem.n_points < problem.n_slots:
+        raise ValueError(f"Only {problem.n_points} data point(s) for {problem.n_slots} estimated parameter(s).")
     x, ssr, jac = problem.solve()
     slot_intervals, bootstrap_failures = _select_intervals(problem, x, ssr, jac, ci, n_boot, seed)
-    params, intervals, r_squared_per, n_points_per = _assemble_dataset_results(problem, x, slot_intervals, ci)
-    r_squared, aic, aicc = _calculate_fit_metrics(problem, x, ssr)
+    evaluations = _evaluate_datasets(problem, x)
+    params, intervals, r_squared_per, n_points_per = _assemble_dataset_results(problem, evaluations, slot_intervals, ci)
+    r_squared, aic, aicc = _calculate_fit_metrics(problem, evaluations, ssr)
     fit_diagnostics, diagnostics_per, statistics_per = _collect_diagnostics(
         problem,
-        params,
+        evaluations,
         intervals,
         jac,
         bootstrap_failures,
@@ -853,15 +878,10 @@ def fit(
     """
     name = "data"
     dataset = Dataset(name, conc, signal, receptor_conc, replicates, sigma)
-    fixed_d = dict(fixed or {})
-    n_estimated = len(model.params) - len(fixed_d)
-    if dataset.conc.size < n_estimated:
-        raise ValueError(f"Only {dataset.conc.size} data point(s) for {n_estimated} estimated parameter(s).")
-
     result = fit_global(
         [dataset],
         model=model,
-        fixed=fixed_d,
+        fixed=fixed,
         unit=unit,
         ci=ci,
         n_boot=n_boot,
