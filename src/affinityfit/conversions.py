@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import overload
 
 from affinityfit.core import FitResult
+from affinityfit.models import _bound_fraction
 from affinityfit.uncertainty import Interval, Method, _finite
 
 
@@ -30,17 +31,8 @@ def _tracer_kd_point(tracer_kd: float | Interval) -> float:
 
 
 def _bound_tracer(receptor_conc: float, tracer_conc: float, tracer_kd: float) -> float:
-    """Tracer bound with no competitor present, `[RL]0`, from the 1:1 equilibrium.
-
-    The same quadratic the `tight_binding` model solves, in the form that keeps its
-    precision: evaluated directly the physical root subtracts two nearly equal numbers.
-    """
-    total = receptor_conc + tracer_conc + tracer_kd
-    if total <= 0:
-        return 0.0
-    u = receptor_conc / total
-    v = tracer_conc / total
-    return receptor_conc * 2.0 * v / (1.0 + math.sqrt(max(0.0, 1.0 - 4.0 * u * v)))
+    """Tracer bound with no competitor present, `[RL]0`, from the 1:1 equilibrium."""
+    return receptor_conc * float(_bound_fraction(tracer_conc, tracer_kd, receptor_conc))
 
 
 def _converter(
@@ -121,8 +113,10 @@ def _map_limits(
 
 def _tracer_sensitivity(
     measured_point: float,
+    corrected_point: float,
     tracer_conc: float,
-    tracer_kd: float | Interval,
+    tracer_kd: Interval,
+    tracer_kd_point: float,
     receptor_conc: float | None,
 ) -> float:
     """Relative half-width that the tracer constant's own error contributes to Ki.
@@ -140,23 +134,16 @@ def _tracer_sensitivity(
     on Kd as well, so its sensitivity is taken as a central difference across the tracer
     interval instead.
     """
-    if not isinstance(tracer_kd, Interval):
-        return 0.0
-    point = _tracer_kd_point(tracer_kd)
-
     if receptor_conc is None:
-        ratio = tracer_conc / point
-        return (ratio / (1.0 + ratio)) * (tracer_kd.half_width / point)
+        ratio = tracer_conc / tracer_kd_point
+        return (ratio / (1.0 + ratio)) * (tracer_kd.half_width / tracer_kd_point)
 
     lower, upper = _finite(tracer_kd.lower), _finite(tracer_kd.upper)
     if lower is None or upper is None or lower <= 0:
         return 0.0
-    middle = _converter(tracer_conc, point, receptor_conc)(measured_point)
-    if middle <= 0:
-        return 0.0
     at_low = _converter(tracer_conc, lower, receptor_conc)(measured_point)
     at_high = _converter(tracer_conc, upper, receptor_conc)(measured_point)
-    return abs(at_high - at_low) / (2.0 * middle)
+    return abs(at_high - at_low) / (2.0 * corrected_point)
 
 
 @overload
@@ -292,16 +279,22 @@ def ki_from_ic50(
 
     kd_point = _tracer_kd_point(tracer_kd)
     if receptor_conc is None:
-        _warn_approximate(tracer_conc, kd_point)
+        _warn_approximate()
 
     convert = _converter(tracer_conc, kd_point, receptor_conc)
     point, lower, upper = _map_limits(measured, convert)
-    tracer_rel = _tracer_sensitivity(
-        measured.point if isinstance(measured, Interval) else measured,
-        tracer_conc,
-        tracer_kd,
-        receptor_conc,
-    )
+    if isinstance(tracer_kd, Interval):
+        measured_point = measured.point if isinstance(measured, Interval) else measured
+        tracer_rel = _tracer_sensitivity(
+            measured_point,
+            point,
+            tracer_conc,
+            tracer_kd,
+            kd_point,
+            receptor_conc,
+        )
+    else:
+        tracer_rel = 0.0
 
     if not isinstance(measured, Interval) and tracer_rel == 0.0:
         return point
@@ -355,8 +348,8 @@ def _combine(
     return Interval(point=point, lower=lower, upper=upper, method=method)
 
 
-def _warn_approximate(tracer_conc: float, tracer_kd: float) -> None:
-    """Say that the Cheng-Prusoff bias could not be assessed.
+def _warn_approximate() -> None:
+    """Warn that the Cheng-Prusoff bias could not be assessed.
 
     The bias comes from the receptor sequestering tracer, so bounding it needs the total
     receptor concentration. Without that value there is nothing to check against, and

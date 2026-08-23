@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from affinityfit import diagnose, fit, hill, langmuir, michaelis
-from affinityfit.core import _residual_structure
+from affinityfit.diagnostics import _residual_structure
 
 CONC = np.concatenate([[0.0], np.logspace(-1, 3, 15)])
 

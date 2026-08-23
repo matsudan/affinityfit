@@ -209,40 +209,32 @@ def _hill(conc: NDArray[np.float64], kd: float, bmax: float, baseline: float, n:
     return baseline + bmax / (1.0 + powered)
 
 
+def _bound_fraction(
+    ligand_conc: NDArray[np.float64] | float,
+    kd: float,
+    receptor_conc: float,
+) -> NDArray[np.float64]:
+    """Fraction of receptor bound at 1:1 equilibrium without ligand-excess assumptions.
+
+    The conjugate form avoids subtracting nearly equal roots at low ligand
+    concentration. Scaling by the sum of the concentrations also prevents the
+    discriminant from overflowing.
+    """
+    ligand = np.asarray(ligand_conc, dtype=float)
+    total = receptor_conc + ligand + kd
+    # Substituting 1 when the total is 0 preserves the physical fraction of 0 at that boundary.
+    scale = np.where(total > 0, total, 1.0)
+    receptor_fraction = receptor_conc / scale
+    ligand_fraction = ligand / scale
+    discriminant = np.maximum(1.0 - 4.0 * receptor_fraction * ligand_fraction, 0.0)
+    return 2.0 * ligand_fraction / (1.0 + np.sqrt(discriminant))
+
+
 def _tight_binding(
     conc: NDArray[np.float64], kd: float, bmax: float, baseline: float, rt: float
 ) -> NDArray[np.float64]:
-    """Binding with ligand depletion solved exactly, written so that it keeps its precision.
-
-    A hyperbola assumes the free ligand concentration equals the total one. That stops
-    holding once the receptor is not much more dilute than Kd, because every molecule
-    bound is one fewer left in solution. Solving the equilibrium without the assumption
-    gives a quadratic in the complex concentration,
-
-        [RL]^2 - (Rt + Lt + Kd) [RL] + Rt Lt = 0,
-
-    whose physical root is the smaller one. Evaluated directly as
-    `(b - sqrt(b^2 - 4 Rt Lt)) / 2` it subtracts two nearly equal numbers at low
-    concentration and throws away most of the significant digits exactly where the
-    curve is most informative. Multiplying by the conjugate turns that subtraction into
-    an addition, and dividing through by `b` keeps `b^2` from overflowing:
-
-        [RL] / Rt = 2 v / (1 + sqrt(1 - 4 u v)),   u = Rt / b,   v = Lt / b.
-
-    Cancelling Rt is also what makes rt = 0 evaluable, where the expression collapses
-    to the hyperbola `Lt / (Lt + Kd)` that `langmuir` describes.
-    """
-    total = rt + conc + kd
-    # Every term is non-negative and Kd is bounded away from zero, so `total` is positive in any fit.
-    # Substituting 1 covers a direct call with kd = 0 at zero concentration, where both numerators
-    # are 0 as well and the fraction is 0 either way.
-    scale = np.where(total > 0, total, 1.0)
-    u = rt / scale
-    v = conc / scale
-    # 4 Rt Lt <= (Rt + Lt + Kd)^2 holds for any non-negative Kd, so the discriminant cannot be
-    # negative; the clamp only absorbs rounding at the boundary, reached when Rt = Lt and Kd = 0.
-    disc = np.maximum(1.0 - 4.0 * u * v, 0.0)
-    return baseline + bmax * (2.0 * v / (1.0 + np.sqrt(disc)))
+    """Binding with ligand depletion solved exactly."""
+    return baseline + bmax * _bound_fraction(conc, kd, rt)
 
 
 # ---------------------------------------------------------------- initial guesses

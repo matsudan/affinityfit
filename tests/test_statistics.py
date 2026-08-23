@@ -96,7 +96,7 @@ def test_all_residuals_one_sign_reports_a_sign_test_instead_of_runs():
     """The runs count is degenerate (always 1) when every residual shares a sign, so a sign test stands in."""
     params = {"kd": 10.0, "bmax": 1.0, "baseline": 0.0}
     signal = langmuir(CONC, *langmuir.ordered(params)) + 0.5
-    from affinityfit.core import _residual_structure
+    from affinityfit.diagnostics import _residual_structure
 
     collected: list[Statistic] = []
     codes = _residual_structure(CONC, signal, langmuir, params, collected)

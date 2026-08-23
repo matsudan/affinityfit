@@ -40,6 +40,9 @@ from affinityfit.formatting import (
 
 Method = Literal["asymptotic", "profile", "bootstrap"]
 
+# Cap on an exponent converted back to a float; 10**309 is not representable.
+_LOG_PARAMETER_LIMIT = 300.0
+
 
 def _finite(value: float | None) -> float | None:
     """The value itself when it is a usable limit, otherwise None."""

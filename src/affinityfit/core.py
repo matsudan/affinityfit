@@ -20,18 +20,6 @@ from affinityfit.diagnostics import (
     Statistic,
     _diagnose_coded,
 )
-from affinityfit.diagnostics import (
-    _at_bound as _at_bound,
-)
-from affinityfit.diagnostics import (
-    _heteroscedastic as _heteroscedastic,
-)
-from affinityfit.diagnostics import (
-    _no_fit as _no_fit,
-)
-from affinityfit.diagnostics import (
-    _residual_structure as _residual_structure,
-)
 from affinityfit.models import Model
 from affinityfit.results import FitResult as FitResult
 from affinityfit.uncertainty import Interval
