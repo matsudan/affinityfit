@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.1](https://github.com/matsudan/affinityfit/compare/v0.5.0...v0.5.1) (2026-08-23)
+
+
+### Bug Fixes
+
+* centralise fit validation and evaluation ([#45](https://github.com/matsudan/affinityfit/issues/45)) ([47a7e16](https://github.com/matsudan/affinityfit/commit/47a7e16fedb9053fa55a0d26c4fed473dedcd514))
+
+
+### Documentation
+
+* correct README contracts and examples ([#42](https://github.com/matsudan/affinityfit/issues/42)) ([27e7c67](https://github.com/matsudan/affinityfit/commit/27e7c67f6329c680d8963ffe3b04eaac4810eb43))
+* simplify Usage CSV loading ([#44](https://github.com/matsudan/affinityfit/issues/44)) ([79c5ef5](https://github.com/matsudan/affinityfit/commit/79c5ef5b08230855c762850430b2f5f8cb5bc2ab))
+
 ## [0.5.0](https://github.com/matsudan/affinityfit/compare/v0.4.0...v0.5.0) (2026-08-22)
 
 
