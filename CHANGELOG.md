@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/matsudan/affinityfit/compare/v0.5.1...v0.5.2) (2026-09-25)
+
+
+### Documentation
+
+* trim README to usage and contracts ([#47](https://github.com/matsudan/affinityfit/issues/47)) ([b32a491](https://github.com/matsudan/affinityfit/commit/b32a49161778457dca382a40f2aee0f03ffe0d72))
+
 ## [0.5.1](https://github.com/matsudan/affinityfit/compare/v0.5.0...v0.5.1) (2026-08-23)
 
 
