@@ -1,0 +1,34 @@
+version: 2
+
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    # Keep the `>=` lower bounds in pyproject.toml as they are, so that routine
+    # updates only refresh uv.lock. Exact pins (e.g. `ty==`) are still bumped.
+    versioning-strategy: "increase-if-necessary"
+    commit-message:
+      # `chore` is hidden from the release-please changelog.
+      prefix: "chore"
+      include: "scope"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
